@@ -1,0 +1,210 @@
+openapi: 3.1.0
+info:
+  title: Shop API
+  version: 1.0.0
+  description: Example schema for developing the OpenAPI -> Routes adapter.
+
+servers:
+  - url: https://api.example.com
+
+paths:
+  /ping:
+    get:
+      operationId: ping
+      summary: Health check (plain text response)
+      responses:
+        '200':
+          description: pong
+          content:
+            text/plain:
+              schema:
+                type: string
+                enum: [pong]
+
+  /users:
+    get:
+      operationId: listUsers
+      summary: List users (query params, array response)
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - name: role
+          in: query
+          schema:
+            $ref: '#/components/schemas/Role'
+      responses:
+        '200':
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+    post:
+      operationId: createUser
+      summary: Create a user (required body, 201, typed errors)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUser'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '409':
+          description: Email is already taken
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /users/{id}:
+    parameters:
+      # shared by all methods of this path
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      operationId: getUser
+      summary: Get a user
+      parameters:
+        - name: expand
+          in: query
+          schema: { type: string, enum: [company, orders] }
+      responses:
+        '200':
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      operationId: updateUser
+      summary: Partial update (optional body fields)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUser'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      operationId: deleteUser
+      summary: Delete a user (204, no content)
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /companies/{companyId}/users/{userId}:
+    get:
+      operationId: getCompanyUser
+      summary: Several path params + header param + default error
+      parameters:
+        - { name: companyId, in: path, required: true, schema: { type: integer } }
+        - { name: userId, in: path, required: true, schema: { type: integer } }
+        - { name: X-Request-Id, in: header, schema: { type: string } }
+      responses:
+        '200':
+          description: User of the company
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        default:
+          description: Any other error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+components:
+  schemas:
+    Role:
+      type: string
+      enum: [admin, member, guest]
+
+    User:
+      type: object
+      required: [id, email, role]
+      properties:
+        id: { type: integer }
+        email: { type: string, format: email }
+        name: { type: [string, 'null'] } # 3.1 nullable
+        role: { $ref: '#/components/schemas/Role' }
+        createdAt: { type: string, format: date-time }
+        tags:
+          type: array
+          items: { type: string }
+
+    CreateUser:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+
+    UpdateUser:
+      type: object
+      properties:
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+
+    ApiError:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+        code: { type: string }
+
+    ValidationError:
+      type: object
+      required: [message, fields]
+      properties:
+        message: { type: string }
+        fields:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }

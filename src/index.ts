@@ -28,5 +28,6 @@ export type { RequestError } from './errors.js';
 export { HttpStatus } from './statusCodes.js';
 export type { HttpStatusCode } from './statusCodes.js';
 export type { Result } from './routes.js';
+export type { FromOpenApi } from './codegen/types.js';
 export type { RegisteredRoutes, RouteDef } from './routes.js';
 export type { Config, Fetcher, FetcherRequestParams } from './types.js';

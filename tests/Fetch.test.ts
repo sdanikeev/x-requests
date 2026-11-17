@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HttpError } from '../src/errors.js';
+import { HttpError, NetworkError, TimeoutError } from '../src/errors.js';
 import Fetch from '../src/Fetch.js';
 
 type Call = { url: string; init: RequestInit };
@@ -270,5 +270,66 @@ describe('Fetch', () => {
 
       assert.deepEqual(result, { ok: 1 });
     }
+  });
+
+  it('без method по умолчанию используется GET', async () => {
+    mockFetch(jsonResponse({}));
+
+    await new Fetch().request({ url: 'https://example.com' } as never);
+
+    assert.equal(calls[0]?.init.method, 'GET');
+  });
+
+  it('отказ fetch не-Error значением -> NetworkError со строкой', async () => {
+    globalThis.fetch = (async () => {
+      throw 'boom';
+    }) as unknown as typeof fetch;
+
+    await assert.rejects(
+      new Fetch().request({ method: 'get', url: 'https://example.com' }),
+      (error: unknown) => error instanceof NetworkError && error.message === 'boom' && error.cause === 'boom',
+    );
+  });
+
+  it('TimeoutError без заданного timeout не содержит мс в сообщении', async () => {
+    globalThis.fetch = (async () => {
+      throw new DOMException('aborted', 'TimeoutError');
+    }) as typeof fetch;
+
+    await assert.rejects(
+      new Fetch().request({ method: 'get', url: 'https://example.com' }),
+      (error: unknown) => error instanceof TimeoutError
+        && error.timeoutMs === undefined
+        && error.message === 'Request timed out',
+    );
+  });
+
+  it('сообщение TimeoutError содержит миллисекунды', async () => {
+    globalThis.fetch = (async () => {
+      throw new DOMException('aborted', 'TimeoutError');
+    }) as typeof fetch;
+
+    await assert.rejects(
+      new Fetch().request({ method: 'get', url: 'https://example.com', timeout: 250 }),
+      /after 250 ms/,
+    );
+  });
+
+  it('HttpError без тела: data — пустая строка', async () => {
+    mockFetch(new Response(null, { status: 500 }));
+
+    await assert.rejects(
+      new Fetch().request({ method: 'get', url: 'https://example.com' }),
+      (error: unknown) => error instanceof HttpError && error.data === '' && error.body === '',
+    );
+  });
+
+  it('HttpError с пустым json-телом: data — пустая строка', async () => {
+    mockFetch(new Response('', { status: 502, headers: { 'Content-Type': 'application/json' } }));
+
+    await assert.rejects(
+      new Fetch().request({ method: 'get', url: 'https://example.com' }),
+      (error: unknown) => error instanceof HttpError && error.data === '',
+    );
   });
 });

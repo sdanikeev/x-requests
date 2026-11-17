@@ -18,8 +18,13 @@ export type RouteDef = {
   body?: unknown;
   query?: unknown;
   headers?: HeadersData;
-  /** Error bodies by status: `{ 404: NotFoundBody; 422: ValidationBody }` */
-  errors?: Partial<Record<number, unknown>>;
+  /** Types of path parameters; names and arity still come from the url placeholders. */
+  path?: Record<string, unknown>;
+  /**
+   * Error bodies by status: `{ 404: NotFoundBody; 422: ValidationBody }`.
+   * `default` is the body for every status that is not listed.
+   */
+  errors?: Partial<Record<number | 'default', unknown>>;
 };
 
 /** `{ '/users/{id}': { get: RouteDef; patch: RouteDef } }` */
@@ -56,12 +61,19 @@ export type PathParamsOf<P extends string> = {
   [K in PathParamNames<P>]: string | number;
 };
 
+/** Path parameter types declared by the route, otherwise `string | number` per placeholder. */
+type PathOf<R, P extends string, M extends Method> = DefOf<R, P, M> extends infer D
+  ? 'path' extends keyof D
+    ? Exclude<D['path'], undefined>
+    : PathParamsOf<P>
+  : PathParamsOf<P>;
+
 /** Arguments after the url: required path params for typed routes. */
-export type PathArgs<R, P extends string> = IsUntyped<R> extends true
+export type PathArgs<R, P extends string, M extends Method> = IsUntyped<R> extends true
   ? [path?: PathParams]
   : [PathParamNames<P>] extends [never]
       ? []
-      : [path: PathParamsOf<P>];
+      : [path: PathOf<R, P, M>];
 
 /** What a request builder accepts for `.body() / .params() / .headers() / .path()`. */
 export type RequestInput = {
@@ -84,14 +96,15 @@ export type InputOf<R, P extends string, M extends Method> = IsUntyped<R> extend
       body: Field<DefOf<R, P, M>, 'body'>;
       query: Field<DefOf<R, P, M>, 'query'>;
       headers: 'headers' extends keyof DefOf<R, P, M> ? Field<DefOf<R, P, M>, 'headers'> : HeadersData;
-      path: PathParamsOf<P>;
+      path: PathOf<R, P, M>;
     };
 
+// `undefined` is a legitimate response (204), so it must not be stripped like in `Field`
 export type ResponseOf<R, P extends string, M extends Method> = IsUntyped<R> extends true
   ? unknown
-  : [Field<DefOf<R, P, M>, 'response'>] extends [never]
-      ? unknown
-      : Field<DefOf<R, P, M>, 'response'>;
+  : DefOf<R, P, M> extends infer D
+    ? 'response' extends keyof D ? D['response'] : unknown
+    : unknown;
 
 /** `{ ok: true, data }` or `{ ok: false, error }` — see `XRequest.result()`. */
 export type Result<T, E> =
@@ -104,7 +117,17 @@ type DeclaredErrors<D> = Field<D, 'errors'> extends infer Errors
       : { [S in keyof Errors & number]: HttpError<S, Errors[S]> }[keyof Errors & number]
   : never;
 
-/** Declared `HttpError<status, body>`s plus everything else a request may fail with. */
+/** The body of an `errors.default` entry, or `HttpError` with unknown data when not declared. */
+type AnyStatusError<D> = Field<D, 'errors'> extends infer Errors
+  ? [Errors] extends [never]
+      ? HttpError
+      : 'default' extends keyof Errors ? HttpError<number, Errors['default']> : HttpError
+  : HttpError;
+
+/**
+ * Declared `HttpError<status, body>`s, an `HttpError` for any other status
+ * (typed by `errors.default` when present) and the non-HTTP failures.
+ */
 export type ErrorOf<R, P extends string, M extends Method> = IsUntyped<R> extends true
   ? RequestError
-  : DeclaredErrors<DefOf<R, P, M>> | RequestError;
+  : DeclaredErrors<DefOf<R, P, M>> | AnyStatusError<DefOf<R, P, M>> | Exclude<RequestError, HttpError>;

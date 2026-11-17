@@ -4,7 +4,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['node_modules', '.test-build', 'dist'] },
+  { ignores: ['node_modules', '.test-build', 'dist', 'examples'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   stylistic.configs.customize({
@@ -25,7 +25,7 @@ export default tseslint.config(
   },
   {
     // compile-time type assertions: values and directives exist only for tsc
-    files: ['tests/types.test.ts'],
+    files: ['tests/types.test.ts', 'tests/openapi.test.ts'],
     rules: {
       '@typescript-eslint/no-unused-vars': 'off',
       '@typescript-eslint/ban-ts-comment': 'off',

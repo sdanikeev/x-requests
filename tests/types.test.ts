@@ -231,4 +231,44 @@ describe('типизация роутов', () => {
       assert.ok(isHttpError(new HttpError(409, ''), 409));
     });
   });
+
+  describe('errors.default и типы path-параметров в ручных роутах', () => {
+    type Body = { message: string };
+
+    interface Manual {
+      '/items/{id}': {
+        get: {
+          response: string;
+          path: { id: number };
+          errors: { 404: { gone: true }; default: Body };
+        };
+      };
+    }
+
+    it('path-параметры берутся из объявленного path', () => {
+      const { fetcher } = createFlakyFetcher(0);
+      const client = new XClient<Manual>(fetcher);
+
+      void (() => client.get('/items/{id}', { id: 1 }));
+      // @ts-expect-error — id объявлен как number
+      void (() => client.get('/items/{id}', { id: 'x' }));
+    });
+
+    it('default типизирует HttpError для остальных статусов, объявленные остаются точными', async () => {
+      const { fetcher } = createFlakyFetcher(10, undefined, () => new HttpError(500, ''));
+      const client = new XClient<Manual>(fetcher);
+      const request = client.get('/items/{id}', { id: 1 });
+      type Err = Awaited<ReturnType<typeof request.result>> extends infer R
+        ? R extends { ok: false; error: infer E } ? E : never
+        : never;
+
+      const narrow = (error: Err) => {
+        if (isHttpError(error, 404)) assertType<Equal<typeof error, HttpError<404, { gone: true }>>>();
+        if (isHttpError(error, 500)) assertType<Equal<typeof error, HttpError<500, Body>>>();
+      };
+
+      narrow((await request.result() as { error: Err }).error);
+      assert.ok(true);
+    });
+  });
 });
