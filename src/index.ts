@@ -31,5 +31,5 @@ export type { HttpStatusCode } from './statusCodes.js';
 export type { Result } from './routes.js';
 export type { FromOpenApi } from './openapi.js';
 export type { RegisteredRoutes, RouteDef } from './routes.js';
-export type { Config, Fetcher, FetcherRequestParams } from './types.js';
+export type { Config, Fetcher, FetcherRequestParams, SseEvent } from './types.js';
 export type { Middleware, Next } from './middleware.js';

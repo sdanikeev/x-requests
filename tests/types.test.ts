@@ -5,8 +5,8 @@ import XClient from '../src/XClient.js';
 import { HttpError, isHttpError } from '../src/errors.js';
 import type { AbortError, NetworkError, ParseError, RequestError, TimeoutError } from '../src/errors.js';
 import type { PathParamNames } from '../src/routes.js';
-import { createFlakyFetcher } from './helpers.js';
-import { createFakeFetcher } from './helpers.js';
+import { createFakeFetcher, createFlakyFetcher, createStreamFetcher } from './helpers.js';
+import type { SseEvent } from '../src/types.js';
 
 // Compile-time assertions: a mistake here fails `tsc` (and thus `npm test`).
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
@@ -271,5 +271,62 @@ describe('route typing', () => {
       narrow((await request.result() as { error: Err }).error);
       assert.ok(true);
     });
+  });
+});
+
+describe('event typing', () => {
+  interface StreamRoutes {
+    '/events': { get: { events: { message: { text: string }; ping: { at: number } } } };
+    '/plain': { get: { response: string } };
+  }
+
+  it('should make events a discriminated union by name if the route declares events', async () => {
+    const { fetcher } = createStreamFetcher([[]]);
+    const client = new XClient<StreamRoutes>(fetcher);
+
+    for await (const event of client.get('/events').stream()) {
+      if (event.event === 'message') assertType<Equal<typeof event.data, { text: string }>>();
+      if (event.event === 'ping') assertType<Equal<typeof event.data, { at: number }>>();
+      assertType<Equal<typeof event.event, 'message' | 'ping'>>();
+    }
+  });
+
+  it('should type data as string if json is disabled', async () => {
+    const { fetcher } = createStreamFetcher([[]]);
+    const client = new XClient<StreamRoutes>(fetcher);
+
+    for await (const event of client.get('/events').stream({ json: false })) {
+      assertType<Equal<typeof event.data, string>>();
+    }
+  });
+
+  it('should type events as unknown data if the route declares no events', async () => {
+    const { fetcher } = createStreamFetcher([[]]);
+    const client = new XClient<StreamRoutes>(fetcher);
+
+    for await (const event of client.get('/plain').stream()) {
+      assertType<Equal<typeof event, SseEvent>>();
+    }
+  });
+
+  it('should type events as unknown data if the client is untyped', async () => {
+    const { fetcher } = createStreamFetcher([[]]);
+
+    for await (const event of new XClient(fetcher).get('https://example.com/events').stream()) {
+      assertType<Equal<typeof event, SseEvent>>();
+    }
+  });
+
+  it('should keep event typing after .fallback() and other chain methods', () => {
+    const { fetcher } = createStreamFetcher([[]]);
+    const request = new XClient<StreamRoutes>(fetcher).get('/events').timeout(1).fallback(null).retries(1);
+
+    const check = async () => {
+      for await (const event of request.stream()) {
+        assertType<Equal<typeof event.event, 'message' | 'ping'>>();
+      }
+    };
+
+    assert.equal(typeof check, 'function');
   });
 });

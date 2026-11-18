@@ -44,7 +44,8 @@ can usually do more through hooks or middleware. `x-requests` is the combination
 - Types per route (manual or generated from OpenAPI) for path params, query, body, responses and errors.
 - Typed errors (`.result()`, `isHttpError`) and typed error bodies per route.
 - Retries with exponential backoff (only for errors that make sense to retry).
-- Per-request timeouts and `.fallback()`.
+- Per-request timeouts, cancellation with `AbortSignal` and `.fallback()`.
+- Server-sent events as a typed async iterable with automatic reconnects.
 - Automatic JSON handling for request bodies and responses.
 - Pluggable `Fetcher` — swap the transport for tests or custom logic.
 - Written in TypeScript with strict types; ESM-only.
@@ -238,6 +239,31 @@ controller.abort(); // result.error is an AbortError (kind: 'abort')
 - `.fallback()` does not hide an abort: cancelling means you do not want a value.
 - `.signal()` works together with `.timeout()`: whichever fires first wins (`AbortError` or `TimeoutError`).
 - The reason passed to `controller.abort(reason)` is available as `error.cause`.
+
+### Server-sent events
+
+`.stream()` opens an SSE connection and returns an async iterable of events:
+
+```ts
+interface Routes {
+  '/events': { get: { events: { tick: { n: number }; done: { total: number } } } };
+}
+
+const client = xclient<Routes>({ config: { baseUrl: 'https://api.example.com' } });
+
+for await (const event of client.get('/events').headers({ Authorization: `Bearer ${token}` }).stream()) {
+  if (event.event === 'tick') event.data.n;       // { n: number }
+  if (event.event === 'done') event.data.total;   // { total: number }
+}
+```
+
+- `data` is parsed as JSON. For plain text (or a sentinel like `[DONE]`) use `.stream({ json: false })`: `data` stays a `string`.
+- Declare the events of a route with `events: { [name]: DataType }`; without it `data` is `unknown` and `event` is a `string`.
+- Any method works (`client.post('/chat').body(...).stream()`), and `.signal()` closes the connection. Breaking out of the loop closes it too.
+- **Reconnects:** after a failure (network error, a retryable status) the stream reconnects up to `.retries(n, backoff)` times, sending `Last-Event-ID` and waiting for the `retry:` hint of the server if it sent one. The counter resets when an event arrives. A stream the server closes normally just ends; it is not reconnected.
+- `.timeout(ms)` limits only the wait for the connection, not the whole stream.
+- Middlewares run once per connection: `onRequest` can add headers, `onResponse` receives the stream.
+- A custom `Fetcher` needs a `stream()` method for this; otherwise `.stream()` throws a `ValidationError`.
 
 ### Middleware
 

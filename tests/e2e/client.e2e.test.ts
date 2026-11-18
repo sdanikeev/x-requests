@@ -1,7 +1,8 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import xclient, { HttpError, HttpStatus, isHttpError } from '../../src/index.js';
+import xclient, { AbortError, HttpError, HttpStatus, isHttpError } from '../../src/index.js';
+import type { ServerResponse } from 'node:http';
 import { sendJson, sleep, startServer } from './server.js';
 
 type Item = { id: number; name: string };
@@ -32,7 +33,15 @@ interface Routes {
   '/reset': { get: { response: never } };
   '/bad-json': { get: { response: never } };
   '/rate-limited': { get: { response: { attempt: number } } };
+  '/sse/feed': {
+    get: { events: { tick: { n: number }; done: { total: number } } };
+  };
+  '/sse/drop': { get: { events: { tick: { n: number } } } };
+  '/sse/forever': { get: { events: { tick: { n: number } } } };
+  '/sse/fail': { get: { events: { tick: { n: number } } } };
 }
+
+const sse = (res: ServerResponse) => res.writeHead(200, { 'Content-Type': 'text/event-stream' });
 
 describe('e2e: client against a real HTTP server', () => {
   let server: Awaited<ReturnType<typeof startServer>>;
@@ -90,6 +99,30 @@ describe('e2e: client against a real HTTP server', () => {
       '/rate-limited': ({ res, hit }) => hit === 1
         ? sendJson(res, HttpStatus.TOO_MANY_REQUESTS, { message: 'slow down' })
         : sendJson(res, 200, { attempt: hit }),
+      '/sse/feed': ({ res }) => {
+        sse(res);
+        res.write(': hello\n\n');
+        res.write('event: tick\nid: 1\ndata: {"n":1}\n\n');
+        res.write('event: tick\nid: 2\ndata: {"n":2}\n\n');
+        res.end('event: done\nid: 3\ndata: {"total":2}\n\n');
+      },
+      '/sse/drop': ({ req, res, hit }) => {
+        sse(res);
+
+        if (hit === 1) {
+          res.write('retry: 5\nevent: tick\nid: 41\ndata: {"n":1}\n\n');
+          setTimeout(() => req.socket.destroy(), 20);
+
+          return;
+        }
+
+        res.end(`event: tick\nid: 42\ndata: {"n":${Number(req.headers['last-event-id'])}}\n\n`);
+      },
+      '/sse/forever': ({ res }) => {
+        sse(res);
+        res.write('event: tick\ndata: {"n":1}\n\n');
+      },
+      '/sse/fail': ({ res }) => sendJson(res, 503, { message: 'down' }),
     });
 
     client = xclient<Routes>({ config: { baseUrl: server.url } });
@@ -260,6 +293,67 @@ describe('e2e: client against a real HTTP server', () => {
       await client.get('/slow').signal(controller.signal).retries(3, 1).result();
 
       assert.equal(server.hitsOf('/slow') - hitsBefore, 1);
+    });
+  });
+
+  describe('server-sent events', () => {
+    it('should yield typed events and ignore comments if the server streams them', async () => {
+      const events = [];
+
+      for await (const event of client.get('/sse/feed').stream()) {
+        events.push(event);
+      }
+
+      assert.deepEqual(events, [
+        { event: 'tick', data: { n: 1 }, id: '1' },
+        { event: 'tick', data: { n: 2 }, id: '2' },
+        { event: 'done', data: { total: 2 }, id: '3' },
+      ]);
+    });
+
+    it('should reconnect with Last-Event-ID after the connection drops', async () => {
+      const events = [];
+
+      for await (const event of client.get('/sse/drop').retries(2, 1000).stream()) {
+        events.push(event.data.n);
+      }
+
+      assert.deepEqual(events, [1, 41]);
+      assert.equal(server.hitsOf('/sse/drop'), 2);
+    });
+
+    it('should stop the stream and free the connection if the signal is aborted', async () => {
+      const controller = new AbortController();
+      const result = [];
+      let error: unknown;
+
+      try {
+        for await (const event of client.get('/sse/forever').signal(controller.signal).stream()) {
+          result.push(event.data.n);
+          controller.abort();
+        }
+      } catch (caught) {
+        error = caught;
+      }
+
+      assert.deepEqual(result, [1]);
+      assert.ok(error instanceof AbortError);
+    });
+
+    it('should throw HttpError and not reconnect if the status is an error', async () => {
+      const hitsBefore = server.hitsOf('/sse/fail');
+      let error: unknown;
+
+      try {
+        for await (const event of client.get('/sse/fail').retries(1, 1).stream()) {
+          assert.fail(`no events expected, got ${event.event}`);
+        }
+      } catch (caught) {
+        error = caught;
+      }
+
+      assert.ok(isHttpError(error, 503));
+      assert.equal(server.hitsOf('/sse/fail') - hitsBefore, 2);
     });
   });
 

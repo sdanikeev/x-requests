@@ -11,9 +11,16 @@ import type {
   Config as GlobalConfig,
   Method,
   Fetcher,
+  FetcherRequestParams,
+  SseEvent,
 } from './types.js';
 
-class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestError> implements PromiseLike<T> {
+class XRequest<
+  T = unknown,
+  In extends RequestInput = DefaultInput,
+  E = RequestError,
+  Ev = SseEvent,
+> implements PromiseLike<T> {
   private readonly globalConfig: GlobalConfig | undefined;
   private readonly fetcher: Fetcher;
   private readonly requestData: Partial<RequestData>;
@@ -81,12 +88,12 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
     return this;
   }
 
-  public fallback<F>(fallback: F | ((error: unknown) => F)): XRequest<T | F, In, E> {
+  public fallback<F>(fallback: F | ((error: unknown) => F)): XRequest<T | F, In, E, Ev> {
     this.fallbackHandler = typeof fallback === 'function'
       ? fallback as (error: unknown) => F
       : () => fallback;
 
-    return this as unknown as XRequest<T | F, In, E>;
+    return this as unknown as XRequest<T | F, In, E, Ev>;
   }
 
   public retries(retries: number, backoffMs?: number) {
@@ -131,6 +138,69 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
     }
   }
 
+  /**
+   * Opens a server-sent events stream. `data` is parsed as JSON unless `{ json: false }` is passed.
+   * After a failure the stream reconnects up to `retries` times, sending `Last-Event-ID`.
+   * A stream that the server closes normally just ends.
+   *
+   *   for await (const event of client.get('/events').stream()) { event.data; }
+   */
+  public stream(): AsyncGenerator<Ev, void, undefined>;
+  public stream(options: { json: false }): AsyncGenerator<SseEvent<string>, void, undefined>;
+  public stream(options?: { json?: boolean }): AsyncGenerator<unknown, void, undefined> {
+    return this.streamEvents(options?.json !== false);
+  }
+
+  private async* streamEvents(json: boolean): AsyncGenerator<unknown, void, undefined> {
+    this.validate();
+
+    if (!this.fetcher.stream) {
+      throw new ValidationError('The fetcher does not support streaming');
+    }
+
+    const retries = this.requestConfig.retries ?? 0;
+    const backoffMs = this.requestConfig.backoffMs ?? 500;
+
+    let failures = 0;
+    let lastId: string | undefined;
+    let retryHint: number | undefined;
+
+    for (;;) {
+      this.throwIfAborted();
+
+      try {
+        const headers = lastId === undefined
+          ? undefined
+          : { ...this.requestData.headers, 'Last-Event-ID': lastId };
+
+        for await (const event of this.fetcher.stream(this.buildRequest(headers))) {
+          failures = 0;
+          lastId = event.id ?? lastId;
+          retryHint = event.retry ?? retryHint;
+
+          yield json ? XRequest.parseEvent(event) : event;
+        }
+
+        return;
+      } catch (error) {
+        if (failures >= retries || !XRequest.isRetryable(error)) throw error;
+
+        await this.sleep(retryHint ?? backoffMs * 2 ** failures);
+        failures++;
+      }
+    }
+  }
+
+  private static parseEvent(event: SseEvent<string>): SseEvent {
+    if (event.data.trim() === '') return event;
+
+    try {
+      return { ...event, data: JSON.parse(event.data) as unknown };
+    } catch (error) {
+      throw new ParseError(event.data, { cause: error });
+    }
+  }
+
   private async run(): Promise<T> {
     this.validate();
 
@@ -157,7 +227,11 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
   }
 
   private execute<T>(): Promise<T> {
-    return this.fetcher.request({
+    return this.fetcher.request(this.buildRequest());
+  }
+
+  private buildRequest(headers = this.requestData.headers): FetcherRequestParams {
+    return {
       url: this.resolveUrl(),
       method: this.requestData.method!,
       ...(this.requestData.body && {
@@ -166,8 +240,8 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
       ...(this.requestData.params && {
         params: this.requestData.params,
       }),
-      ...(this.requestData.headers && {
-        headers: this.requestData.headers,
+      ...(headers && {
+        headers,
       }),
       ...(this.requestConfig.timeout && {
         timeout: this.requestConfig.timeout,
@@ -175,7 +249,7 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
       ...(this.requestConfig.signal && {
         signal: this.requestConfig.signal,
       }),
-    });
+    };
   }
 
   private async executeWithRetries<T>(): Promise<T> {

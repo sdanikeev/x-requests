@@ -1,5 +1,5 @@
 import type { HttpError, RequestError } from './errors.js';
-import type { Body, HeadersData, Method, Params, PathParams } from './types.js';
+import type { Body, HeadersData, Method, Params, PathParams, SseEvent } from './types.js';
 
 /**
  * Empty on purpose: extend it with declaration merging to describe the API
@@ -24,6 +24,8 @@ export type RouteDef = {
    * `default` is the body for every status that is not listed.
    */
   errors?: Partial<Record<number | 'default', unknown>>;
+  /** Server-sent events by event name: `{ message: Msg; update: Upd }`. */
+  events?: Record<string, unknown>;
 };
 
 export type RoutesConstraint<R> = {
@@ -123,3 +125,13 @@ type AnyStatusError<D> = Field<D, 'errors'> extends infer Errors
 export type ErrorOf<R, P extends string, M extends Method> = IsUntyped<R> extends true
   ? RequestError
   : DeclaredErrors<DefOf<R, P, M>> | AnyStatusError<DefOf<R, P, M>> | Exclude<RequestError, HttpError>;
+
+type EventsMap<D> = Field<D, 'events'>;
+
+export type EventOf<R, P extends string, M extends Method> = IsUntyped<R> extends true
+  ? SseEvent
+  : [EventsMap<DefOf<R, P, M>>] extends [never]
+      ? SseEvent
+      : {
+          [K in keyof EventsMap<DefOf<R, P, M>> & string]: SseEvent<EventsMap<DefOf<R, P, M>>[K], K>;
+        }[keyof EventsMap<DefOf<R, P, M>> & string];

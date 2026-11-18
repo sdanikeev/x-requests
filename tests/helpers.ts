@@ -1,4 +1,4 @@
-import type { Fetcher, FetcherRequestParams } from '../src/types.js';
+import type { Fetcher, FetcherRequestParams, SseEvent } from '../src/types.js';
 
 export const createFakeFetcher = (response: unknown = { ok: true }) => {
   const calls: FetcherRequestParams[] = [];
@@ -45,3 +45,32 @@ export const hangingFetch = ((_url: string, init: RequestInit) =>
       reject(init.signal?.reason);
     });
   })) as typeof fetch;
+
+type Connection = (SseEvent<string> | Error)[];
+
+// Every call of stream() consumes the next connection: events are yielded, an Error is thrown.
+export const createStreamFetcher = (connections: Connection[]) => {
+  const calls: FetcherRequestParams[] = [];
+  const fetcher: Fetcher = {
+    async request<T>() {
+      return undefined as T;
+    },
+    async* stream(data: FetcherRequestParams) {
+      calls.push(data);
+
+      for (const item of connections[calls.length - 1] ?? []) {
+        if (item instanceof Error) throw item;
+
+        yield item;
+      }
+    },
+  };
+
+  return { fetcher, calls };
+};
+
+export const event = (data: string, extra: Partial<SseEvent<string>> = {}): SseEvent<string> => ({
+  event: 'message',
+  data,
+  ...extra,
+});

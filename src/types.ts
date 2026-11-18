@@ -35,6 +35,14 @@ export type FetcherRequestParams = {
   signal?: AbortSignal;
 };
 
+export type SseEvent<D = unknown, N extends string = string> = {
+  event: N;
+  data: D;
+  id?: string;
+  retry?: number;
+};
+
 export interface Fetcher {
   request<T = unknown>(data: FetcherRequestParams): Promise<T>;
+  stream?(data: FetcherRequestParams): AsyncIterable<SseEvent<string>>;
 }

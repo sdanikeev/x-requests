@@ -1,7 +1,8 @@
 import { stringify } from 'fast-stringify';
 import { AbortError, HttpError, NetworkError, ParseError, TimeoutError } from './errors.js';
+import { parseSse } from './sse.js';
 import { isEmptyResponse } from './statusCodes.js';
-import type { Fetcher, FetcherRequestParams } from './types.js';
+import type { Fetcher, FetcherRequestParams, SseEvent } from './types.js';
 
 class Fetch implements Fetcher {
   public async request<T = unknown>(
@@ -32,6 +33,73 @@ class Fetch implements Fetcher {
     }
 
     return (await this.prepareResult(response)) as T;
+  }
+
+  public async* stream(data: FetcherRequestParams): AsyncGenerator<SseEvent<string>> {
+    const fetch = await this.getFetch();
+
+    const headers = this.prepareHeaders(data.headers, Boolean(data.body));
+
+    if (!headers.has('Accept')) headers.set('Accept', 'text/event-stream');
+
+    // for a stream the timeout limits only the wait for the connection, not the whole stream
+    const controller = new AbortController();
+    const state = { timedOut: false };
+    const onAbort = () => controller.abort(data.signal?.reason);
+    const timer = data.timeout
+      ? setTimeout(() => {
+          state.timedOut = true;
+          controller.abort();
+        }, data.timeout)
+      : undefined;
+
+    if (data.signal?.aborted) onAbort();
+    else data.signal?.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      let response: Response;
+
+      try {
+        response = await fetch(this.prepareUrl(data.url, data.params), {
+          method: (data.method ?? 'GET').toUpperCase(),
+          headers,
+          signal: controller.signal,
+          ...(data.body && {
+            body: typeof data.body === 'string' ? data.body : stringify(data.body),
+          }),
+        });
+      } catch (error) {
+        throw this.toStreamError(error, data, state.timedOut);
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (!response.ok) {
+        const raw = await response.text();
+        const isJson = Boolean(response.headers.get('Content-Type')?.toLowerCase().includes('application/json'));
+
+        throw new HttpError(response.status, raw, this.parseErrorBody(raw, isJson));
+      }
+
+      if (!response.body) return;
+
+      try {
+        yield* parseSse(response.body as unknown as AsyncIterable<Uint8Array>);
+      } catch (error) {
+        throw this.toStreamError(error, data, state.timedOut);
+      }
+    } finally {
+      clearTimeout(timer);
+      data.signal?.removeEventListener('abort', onAbort);
+      controller.abort();
+    }
+  }
+
+  private toStreamError(error: unknown, data: FetcherRequestParams, timedOut: boolean) {
+    if (data.signal?.aborted) return new AbortError({ cause: data.signal.reason });
+    if (timedOut) return new TimeoutError(data.timeout, { cause: error });
+
+    return new NetworkError(error instanceof Error ? error.message : String(error), { cause: error });
   }
 
   private prepareSignal(signal?: AbortSignal, timeout?: number): AbortSignal | undefined {

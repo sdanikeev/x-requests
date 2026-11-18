@@ -1,6 +1,7 @@
 import type { Config, Fetcher, FetcherRequestParams, Method } from './types.js';
 import type {
   ErrorOf,
+  EventOf,
   InputOf,
   PathArgs,
   RegisteredRoutes,
@@ -74,7 +75,7 @@ class XClient<R extends RoutesConstraint<R> = RegisteredRoutes> {
     method: Method,
     url: string,
     args: unknown[],
-  ): XRequest<ResponseOf<R, P, M>, InputOf<R, P, M>, ErrorOf<R, P, M>> {
+  ): XRequest<ResponseOf<R, P, M>, InputOf<R, P, M>, ErrorOf<R, P, M>, EventOf<R, P, M>> {
     const request = new XRequest(this.fetcher, method, url, this.config);
     const [path] = args as [Record<string, string | number> | undefined];
 
