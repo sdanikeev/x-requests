@@ -46,3 +46,15 @@ export const startSpecServer = async (status = 200) => {
     close: () => new Promise<void>(resolve => server.close(() => resolve())),
   };
 };
+
+export const waitFor = async (condition: () => Promise<boolean> | boolean, timeoutMs = 5000) => {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (await condition()) return true;
+
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+
+  return false;
+};

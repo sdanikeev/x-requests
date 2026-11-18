@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import Generator from '../src/Generator.js';
+import Generator, { loadConfig } from '../src/Generator.js';
 import { createTempDir, startSpecServer, writeSpec } from './helpers.js';
 
 describe('Generator', () => {
@@ -74,5 +74,46 @@ describe('Generator', () => {
     } finally {
       await server.close();
     }
+  });
+
+  it('should return the file content without writing it if render() is called', async () => {
+    const from = await writeSpec(dir);
+    const to = join(dir, 'schema.d.ts');
+
+    const content = await new Generator({ from, to }).render();
+
+    assert.match(content, /export interface paths/);
+    await assert.rejects(readFile(to, 'utf8'), /ENOENT/);
+  });
+
+  it('should return true if check() finds the output up to date', async () => {
+    const from = await writeSpec(dir);
+    const generator = new Generator({ from, to: join(dir, 'schema.d.ts') });
+
+    await generator.generate();
+
+    assert.equal(await generator.check(), true);
+  });
+
+  it('should return false and not write if check() finds no output file', async () => {
+    const from = await writeSpec(dir);
+    const to = join(dir, 'schema.d.ts');
+
+    assert.equal(await new Generator({ from, to }).check(), false);
+    await assert.rejects(readFile(to, 'utf8'), /ENOENT/);
+  });
+
+  it('should return false and keep the file if check() finds the output out of date', async () => {
+    const from = await writeSpec(dir);
+    const to = join(dir, 'schema.d.ts');
+
+    await writeFile(to, 'old');
+
+    assert.equal(await new Generator({ from, to }).check(), false);
+    assert.equal(await readFile(to, 'utf8'), 'old');
+  });
+
+  it('should export loadConfig for programmatic use', () => {
+    assert.equal(typeof loadConfig, 'function');
   });
 });
