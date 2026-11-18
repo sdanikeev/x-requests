@@ -1,4 +1,4 @@
-import { HttpError, ParseError, ValidationError, toRequestError } from './errors.js';
+import { AbortError, HttpError, ParseError, ValidationError, toRequestError } from './errors.js';
 import { isRetryableStatus } from './statusCodes.js';
 import type { RequestError } from './errors.js';
 import type { DefaultInput, RequestInput, Result } from './routes.js';
@@ -21,6 +21,7 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
     timeout?: number | null;
     retries?: number;
     backoffMs?: number;
+    signal?: AbortSignal;
   } = {};
 
   private fallbackHandler: ((error: unknown) => unknown) | undefined;
@@ -70,6 +71,12 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
 
   public timeout(ms: number | null) {
     this.requestConfig.timeout = ms;
+
+    return this;
+  }
+
+  public signal(signal: AbortSignal) {
+    this.requestConfig.signal = signal;
 
     return this;
   }
@@ -130,7 +137,7 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
     try {
       return await this.executeWithRetries<T>();
     } catch (error) {
-      if (!this.fallbackHandler) throw error;
+      if (!this.fallbackHandler || error instanceof AbortError) throw error;
 
       return this.fallbackHandler(error) as T;
     }
@@ -165,6 +172,9 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
       ...(this.requestConfig.timeout && {
         timeout: this.requestConfig.timeout,
       }),
+      ...(this.requestConfig.signal && {
+        signal: this.requestConfig.signal,
+      }),
     });
   }
 
@@ -173,6 +183,8 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
     const backoffMs = this.requestConfig.backoffMs ?? 500;
 
     for (let attempt = 0; ; attempt++) {
+      this.throwIfAborted();
+
       try {
         return await this.execute<T>();
       } catch (error) {
@@ -180,12 +192,37 @@ class XRequest<T = unknown, In extends RequestInput = DefaultInput, E = RequestE
           throw error;
         }
 
-        await new Promise(resolve => setTimeout(resolve, backoffMs * 2 ** attempt));
+        await this.sleep(backoffMs * 2 ** attempt);
       }
     }
   }
 
+  private throwIfAborted() {
+    const { signal } = this.requestConfig;
+
+    if (signal?.aborted) throw new AbortError({ cause: signal.reason });
+  }
+
+  private sleep(ms: number): Promise<void> {
+    const { signal } = this.requestConfig;
+
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(new AbortError({ cause: signal?.reason }));
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
   private static isRetryable(error: unknown): boolean {
+    if (error instanceof AbortError) return false;
+
     if (error instanceof HttpError) {
       return isRetryableStatus(error.status);
     }

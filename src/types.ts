@@ -32,6 +32,7 @@ export type FetcherRequestParams = {
   params?: Params;
   headers?: HeadersData;
   timeout?: number;
+  signal?: AbortSignal;
 };
 
 export interface Fetcher {

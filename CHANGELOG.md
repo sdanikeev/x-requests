@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `@x-requests/core`: request cancellation — `.signal(AbortSignal)` and `AbortError` (`kind: 'abort'`). Aborted requests are not retried and are not replaced by `.fallback()`.
+
 ## @x-requests/core 0.2.0
 
 - Middleware — `client.use()`, `client.onRequest()`, `client.onResponse()` and `config.middleware`.

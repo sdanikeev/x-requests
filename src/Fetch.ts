@@ -1,5 +1,5 @@
 import { stringify } from 'fast-stringify';
-import { HttpError, NetworkError, ParseError, TimeoutError } from './errors.js';
+import { AbortError, HttpError, NetworkError, ParseError, TimeoutError } from './errors.js';
 import { isEmptyResponse } from './statusCodes.js';
 import type { Fetcher, FetcherRequestParams } from './types.js';
 
@@ -12,15 +12,15 @@ class Fetch implements Fetcher {
     const url = this.prepareUrl(data.url, data.params);
     const headers = this.prepareHeaders(data.headers, Boolean(data.body));
 
+    const signal = this.prepareSignal(data.signal, data.timeout);
+
     let response: Response;
 
     try {
       response = await fetch(url, {
         method: (data.method ?? 'GET').toUpperCase(),
         headers,
-        ...(data.timeout && {
-          signal: AbortSignal.timeout(data.timeout),
-        }),
+        ...(signal && { signal }),
         ...(data.body && {
           body: typeof data.body === 'string'
             ? data.body
@@ -28,13 +28,37 @@ class Fetch implements Fetcher {
         }),
       });
     } catch (error) {
-      throw this.toTransportError(error, data.timeout);
+      throw this.toTransportError(error, data.timeout, data.signal);
     }
 
     return (await this.prepareResult(response)) as T;
   }
 
-  private toTransportError(error: unknown, timeout?: number) {
+  private prepareSignal(signal?: AbortSignal, timeout?: number): AbortSignal | undefined {
+    const signals = [signal, timeout ? AbortSignal.timeout(timeout) : undefined]
+      .filter((item): item is AbortSignal => item !== undefined);
+
+    if (signals.length < 2) return signals[0];
+    if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals);
+
+    const controller = new AbortController();
+
+    for (const item of signals) {
+      if (item.aborted) {
+        controller.abort(item.reason);
+      } else {
+        item.addEventListener('abort', () => controller.abort(item.reason), { once: true });
+      }
+    }
+
+    return controller.signal;
+  }
+
+  private toTransportError(error: unknown, timeout?: number, signal?: AbortSignal) {
+    if (signal?.aborted) {
+      return new AbortError({ cause: signal.reason });
+    }
+
     if (error instanceof Error && error.name === 'TimeoutError') {
       return new TimeoutError(timeout, { cause: error });
     }

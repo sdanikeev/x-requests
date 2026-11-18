@@ -16,6 +16,7 @@ const xclient = <R extends RoutesConstraint<R> = RegisteredRoutes>(config?: {
 export default xclient;
 
 export {
+  AbortError,
   HttpError,
   NetworkError,
   ParseError,

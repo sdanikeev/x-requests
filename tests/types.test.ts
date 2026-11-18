@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import XClient from '../src/XClient.js';
 import { HttpError, isHttpError } from '../src/errors.js';
-import type { NetworkError, ParseError, RequestError, TimeoutError } from '../src/errors.js';
+import type { AbortError, NetworkError, ParseError, RequestError, TimeoutError } from '../src/errors.js';
 import type { PathParamNames } from '../src/routes.js';
 import { createFlakyFetcher } from './helpers.js';
 import { createFakeFetcher } from './helpers.js';
@@ -162,7 +162,7 @@ describe('route typing', () => {
 
       // narrowing checks live in a function so the test's flow analysis does not affect the types
       const narrow = (error: Err) => {
-        assertType<Equal<typeof error.kind, 'http' | 'timeout' | 'network' | 'parse'>>();
+        assertType<Equal<typeof error.kind, 'http' | 'timeout' | 'network' | 'parse' | 'abort'>>();
 
         if (isHttpError(error, 404)) {
           assertType<Equal<typeof error, HttpError<404, NotFound>>>();
@@ -174,6 +174,7 @@ describe('route typing', () => {
         if (error.kind === 'timeout') assertType<Equal<typeof error, TimeoutError>>();
         if (error.kind === 'network') assertType<Equal<typeof error, NetworkError>>();
         if (error.kind === 'parse') assertType<Equal<typeof error, ParseError>>();
+        if (error.kind === 'abort') assertType<Equal<typeof error, AbortError>>();
       };
 
       const result = await request.result();

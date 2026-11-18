@@ -239,6 +239,30 @@ describe('e2e: client against a real HTTP server', () => {
     });
   });
 
+  describe('cancellation', () => {
+    it('should throw AbortError without waiting for the server if the signal fires', async () => {
+      const controller = new AbortController();
+      const started = Date.now();
+
+      setTimeout(() => controller.abort(), 30);
+      const result = await client.get('/slow').signal(controller.signal).result();
+
+      assert.ok(!result.ok);
+      assert.equal(result.error.kind, 'abort');
+      assert.ok(Date.now() - started < 250, 'abort must not wait for the server response');
+    });
+
+    it('should not retry if the request is aborted', async () => {
+      const controller = new AbortController();
+      const hitsBefore = server.hitsOf('/slow');
+
+      setTimeout(() => controller.abort(), 30);
+      await client.get('/slow').signal(controller.signal).retries(3, 1).result();
+
+      assert.equal(server.hitsOf('/slow') - hitsBefore, 1);
+    });
+  });
+
   describe('fallbacks', () => {
     it('should use the fallback value if retries are exhausted', async () => {
       const hitsBefore = server.hitsOf('/always-503');

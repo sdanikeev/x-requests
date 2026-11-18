@@ -30,6 +30,14 @@ export class TimeoutError extends XRequestError {
   }
 }
 
+export class AbortError extends XRequestError {
+  public readonly kind = 'abort' as const;
+
+  constructor(options?: ErrorOptions) {
+    super('Request aborted', options);
+  }
+}
+
 export class NetworkError extends XRequestError {
   public readonly kind = 'network' as const;
 }
@@ -51,7 +59,7 @@ export class ValidationError extends Error {
   }
 }
 
-export type RequestError = HttpError | TimeoutError | NetworkError | ParseError;
+export type RequestError = HttpError | TimeoutError | NetworkError | ParseError | AbortError;
 
 export const toRequestError = (error: unknown): RequestError => {
   if (error instanceof XRequestError) return error as RequestError;

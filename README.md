@@ -222,6 +222,23 @@ interface Routes {
 `result.error` is then `HttpError<404, {message: string}> | HttpError<422, {fields: string[]}> | RequestError`:
 the server may always answer with an undeclared status, so the generic errors stay in the union.
 
+### Cancellation
+
+Pass an `AbortSignal` to cancel a request, for example when a component unmounts or the user types again:
+
+```ts
+const controller = new AbortController();
+
+const result = await client.get('/search').params({ q }).signal(controller.signal).result();
+
+controller.abort(); // result.error is an AbortError (kind: 'abort')
+```
+
+- An aborted request is never retried, also during the pause between attempts.
+- `.fallback()` does not hide an abort: cancelling means you do not want a value.
+- `.signal()` works together with `.timeout()`: whichever fires first wins (`AbortError` or `TimeoutError`).
+- The reason passed to `controller.abort(reason)` is available as `error.cause`.
+
 ### Middleware
 
 A middleware wraps every attempt of a request (including retries) and can change the request,
