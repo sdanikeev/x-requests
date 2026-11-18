@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## @x-requests/core 0.4.0
 
 - Files: `.multipart(object | FormData)` for `multipart/form-data`, `FormData`, `Blob`, `URLSearchParams` and `ArrayBuffer` bodies, and `.responseType('blob' | 'arrayBuffer' | 'text')` for binary and raw responses.
 - `.idempotent(key?)` sends an `Idempotency-Key` (a random UUID unless given) that is the same on every retry and stream reconnect; `Config.idempotencyHeader` renames the header.
