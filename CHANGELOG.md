@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `@x-requests/core`: middleware — `client.use()`, `client.onRequest()`, `client.onResponse()` and `config.middleware`.
+
 ## @x-requests/codegen 0.1.1
 
 - Add README to the package.

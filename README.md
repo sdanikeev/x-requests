@@ -222,6 +222,35 @@ interface Routes {
 `result.error` is then `HttpError<404, {message: string}> | HttpError<422, {fields: string[]}> | RequestError`:
 the server may always answer with an undeclared status, so the generic errors stay in the union.
 
+### Middleware
+
+A middleware wraps every attempt of a request (including retries) and can change the request,
+the response, or skip the call altogether:
+
+```ts
+const off = client.use(async (req, next) => {
+  const started = Date.now();
+  const response = await next({ ...req, headers: { ...req.headers, Authorization: `Bearer ${token}` } });
+
+  console.log(req.url, Date.now() - started, 'ms');
+
+  return response;
+});
+
+client.onRequest(req => ({ ...req, headers: { ...req.headers, 'X-Trace': id } })); // before
+client.onResponse(response => unwrap(response));                                     // after
+
+off(); // remove a middleware
+```
+
+Middlewares can also be passed up front: `xclient({ config: { middleware: [...] } })`.
+
+- Order: the first registered middleware is the outermost one, so `onRequest` handlers run in
+  registration order and `onResponse` handlers in reverse.
+- Middlewares added later apply to the requests made after that; each client has its own list.
+- An error thrown by a middleware goes through the same rules as a fetcher error (`NetworkError`, retries).
+- A middleware sees the plain request and the raw response (`unknown`), not the types of a route.
+
 ### Custom fetcher
 
 Anything implementing the `Fetcher` interface can be used as the transport,

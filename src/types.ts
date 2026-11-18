@@ -1,6 +1,9 @@
+import type { Middleware } from './middleware.js';
+
 export type Config = {
   baseUrl?: string;
   maxRetries?: number;
+  middleware?: Middleware[];
 };
 
 export type RequestData = {

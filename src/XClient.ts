@@ -1,4 +1,4 @@
-import type { Config, Fetcher, Method } from './types.js';
+import type { Config, Fetcher, FetcherRequestParams, Method } from './types.js';
 import type {
   ErrorOf,
   InputOf,
@@ -9,13 +9,22 @@ import type {
   UrlOf,
 } from './routes.js';
 
+import type { Middleware } from './middleware.js';
+
+import MiddlewareFetcher from './MiddlewareFetcher.js';
 import XRequest from './XRequest.js';
 
 class XClient<R extends RoutesConstraint<R> = RegisteredRoutes> {
+  private readonly middlewares: Middleware[];
+  private readonly fetcher: Fetcher;
+
   constructor(
-    private readonly fetcher: Fetcher,
+    fetcher: Fetcher,
     private readonly config?: Config,
-  ) { }
+  ) {
+    this.middlewares = [...(config?.middleware ?? [])];
+    this.fetcher = new MiddlewareFetcher(fetcher, this.middlewares);
+  }
 
   public get<P extends UrlOf<R, 'get'> & string>(url: P, ...path: PathArgs<R, P, 'get'>) {
     return this.createXRequest<P, 'get'>('get', url, path);
@@ -39,6 +48,26 @@ class XClient<R extends RoutesConstraint<R> = RegisteredRoutes> {
 
   public options<P extends UrlOf<R, 'options'> & string>(url: P, ...path: PathArgs<R, P, 'options'>) {
     return this.createXRequest<P, 'options'>('options', url, path);
+  }
+
+  public use(middleware: Middleware): () => void {
+    this.middlewares.push(middleware);
+
+    return () => {
+      const index = this.middlewares.indexOf(middleware);
+
+      if (index !== -1) this.middlewares.splice(index, 1);
+    };
+  }
+
+  public onRequest(
+    handler: (data: FetcherRequestParams) => FetcherRequestParams | Promise<FetcherRequestParams>,
+  ): () => void {
+    return this.use(async (data, next) => next(await handler(data)));
+  }
+
+  public onResponse(handler: (response: unknown) => unknown): () => void {
+    return this.use(async (data, next) => handler(await next(data)));
   }
 
   private createXRequest<P extends string, M extends Method>(
