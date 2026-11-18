@@ -31,6 +31,7 @@ if (result.ok) {
 | Typed error bodies per status | yes | no | no | yes |
 | Built-in retries with backoff | yes | yes | yes | no |
 | Built-in timeout | yes | yes | yes | no |
+| Circuit breaker and rate limit (built in) | yes | no | no | no |
 | `.fallback(value)` | yes | no | no | no |
 | Non-throwing `result()` | yes | no | no | yes (default) |
 
@@ -43,7 +44,7 @@ can usually do more through hooks or middleware. `x-requests` is the combination
 - Fluent, chainable request builder — a request is a thenable, so you simply `await` it.
 - Types per route (manual or generated from OpenAPI) for path params, query, body, responses and errors.
 - Typed errors (`.result()`, `isHttpError`) and typed error bodies per route.
-- Retries with exponential backoff (only for errors that make sense to retry) and `.idempotent()` to keep them safe for `POST`.
+- Retries with jittered exponential backoff that honor `Retry-After`, only for errors that make sense to retry; `POST`/`PATCH` are retried only with `.idempotent()`.
 - Per-request timeouts, cancellation with `AbortSignal` and `.fallback()`.
 - Server-sent events as a typed async iterable with automatic reconnects.
 - Automatic JSON handling for request bodies and responses, `multipart/form-data` uploads and binary downloads.
@@ -74,11 +75,14 @@ const client = xclient({
   config: {
     baseUrl: 'https://api.example.com', // prepended to relative URLs
     maxRetries: 5,                      // upper limit for .retries()
+    retry: { jitter: true },            // defaults for .retries(), see Retries
+    idempotencyHeader: 'Idempotency-Key', // header sent by .idempotent()
+    middleware: [loggerMiddleware()],   // see Middleware
   },
 });
 ```
 
-Both options are optional. `xclient()` with no arguments is valid.
+Every option is optional. `xclient()` with no arguments is valid.
 
 ### Making requests
 
@@ -121,9 +125,12 @@ before any request is sent (and is never replaced by `.fallback()`). Use unique 
 | `.params(data)`              | Query string parameters. `null` and `undefined` values are skipped. |
 | `.headers(data)`             | Request headers.                                                  |
 | `.timeout(ms)`               | Abort the request (per attempt) after `ms` milliseconds.          |
-| `.retries(count, backoffMs?)`| Retry failed requests up to `count` times. `backoffMs` defaults to `500`. |
+| `.retries(count, backoffMs?, options?)` | Retry failed requests up to `count` times. `backoffMs` defaults to `500`; `options` are `jitter`, `maxRetryAfter` and `unsafe` (see [Retries](#retries)). |
+| `.signal(signal)`            | Cancel the request with an `AbortSignal` (see [Cancellation](#cancellation)). |
 | `.idempotent(key?)`          | Send an `Idempotency-Key` that stays the same on every retry (see [Idempotency](#idempotency)). |
 | `.fallback(value \| fn)`     | Resolve with `value` (or `fn(error)`) instead of throwing when the request finally fails. |
+| `.result()`                  | Like `await`, but resolves to `{ ok, data } \| { ok, error }` instead of rejecting (see [Errors](#errors)). |
+| `.stream()`                  | Open a server-sent events stream as an async iterable (see [Server-sent events](#server-sent-events)). |
 
 The request is sent on the first `await` (or `.then`). Awaiting the same
 request several times never sends it again — the result is cached.
@@ -517,6 +524,15 @@ npx @x-requests/codegen gen --from ./openapi.yaml --to ./src/api/schema.d.ts
 
 `--from` accepts a file path or an `http(s)` url (short flags: `-f`, `-t`). `openapi-typescript`
 is an optional peer dependency of `@x-requests/codegen` and has to be installed next to it.
+
+For several services put them in `x-requests.config.json` and run `npx @x-requests/codegen gen`:
+
+```json
+{ "schemas": [{ "from": "./specs/users.json", "to": "./src/api/users.d.ts" }, { "from": "./specs/billing.json", "to": "./src/api/billing.d.ts" }] }
+```
+
+`gen --check` fails when a generated file is out of date (for CI) and `gen --watch` regenerates on every change of a local spec.
+See the [codegen README](packages/codegen) for details.
 
 ```ts
 import xclient, { type FromOpenApi } from '@x-requests/core';
