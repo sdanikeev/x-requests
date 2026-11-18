@@ -1,6 +1,16 @@
 {
   "name": "@x-requests/core",
-  "version": "1.0.0",
+  "version": "0.1.0",
+  "description": "Promise-like HTTP client with per-route types, retries, timeouts and fallbacks",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sdanikeev/x-requests.git"
+  },
+  "homepage": "https://github.com/sdanikeev/x-requests#readme",
+  "bugs": {
+    "url": "https://github.com/sdanikeev/x-requests/issues"
+  },
   "author": {
     "name": "Saveliy Anikeev"
   },
@@ -14,7 +24,15 @@
     "coverage": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test --experimental-test-coverage --test-coverage-exclude=\".test-build/tests/**\" --test-coverage-lines=95 --test-coverage-branches=90 --test-coverage-functions=95 \".test-build/tests/*.test.js\"",
     "test:e2e": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test \".test-build/tests/e2e/*.test.js\""
   },
-  "keywords": [],
+  "keywords": [
+    "http",
+    "fetch",
+    "client",
+    "typescript",
+    "openapi",
+    "retry",
+    "typed"
+  ],
   "type": "module",
   "workspaces": [
     "packages/*"
@@ -51,6 +69,11 @@
   },
   "files": [
     "dist",
-    "README.md"
-  ]
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

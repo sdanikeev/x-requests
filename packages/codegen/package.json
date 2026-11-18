@@ -1,6 +1,17 @@
 {
   "name": "@x-requests/codegen",
-  "version": "1.0.0",
+  "version": "0.1.0",
+  "description": "CLI that generates TypeScript route types for @x-requests/core from an OpenAPI document",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sdanikeev/x-requests.git",
+    "directory": "packages/codegen"
+  },
+  "homepage": "https://github.com/sdanikeev/x-requests#readme",
+  "bugs": {
+    "url": "https://github.com/sdanikeev/x-requests/issues"
+  },
   "author": {
     "name": "Saveliy Anikeev"
   },
@@ -26,6 +37,16 @@
     "node": ">=18"
   },
   "files": [
-    "dist"
-  ]
+    "dist",
+    "LICENSE"
+  ],
+  "keywords": [
+    "openapi",
+    "codegen",
+    "typescript",
+    "cli"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

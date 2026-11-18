@@ -1,28 +1,53 @@
 # x-requests
 
-A tiny, promise-like HTTP client with a fluent API, built-in retries and a pluggable fetcher.
+A small, promise-like HTTP client where **the route is the contract**: path params, query, body,
+responses and error bodies are typed per route, and retries, timeouts and fallbacks are built in.
 
 ```ts
-import xclient from '@x-requests/core';
+import xclient, { type FromOpenApi, isHttpError } from '@x-requests/core';
+import type { paths } from './api/schema'; // generated: npx @x-requests/codegen gen -f openapi.json -t src/api/schema.d.ts
 
-const client = xclient({ config: { baseUrl: 'https://api.example.com' } });
+const api = xclient<FromOpenApi<paths>>({ config: { baseUrl: 'https://api.example.com' } });
 
-const user = await client
-  .get('/users/1')
-  .params({ expand: 'profile' })
+const result = await api
+  .get('/users/{id}', { id: 1 })   // path params are required and checked
+  .params({ expand: 'profile' })   // query is typed from the schema
   .timeout(5000)
-  .retries(3);
+  .retries(3)                      // exponential backoff, only for errors worth retrying
+  .result();                       // never rejects: { ok, data } | { ok, error }
+
+if (result.ok) {
+  result.data;                     // typed response
+} else if (isHttpError(result.error, 404)) {
+  result.error.data;               // typed 404 body
+}
 ```
+
+## Why
+
+| | x-requests | [ky](https://github.com/sindresorhus/ky) | [ofetch](https://github.com/unjs/ofetch) | [openapi-fetch](https://openapi-ts.dev/openapi-fetch/) |
+| --- | :---: | :---: | :---: | :---: |
+| Types per route from OpenAPI | yes | no | no | yes |
+| Typed error bodies per status | yes | no | no | yes |
+| Built-in retries with backoff | yes | yes | yes | no |
+| Built-in timeout | yes | yes | yes | no |
+| `.fallback(value)` | yes | no | no | no |
+| Non-throwing `result()` | yes | no | no | yes (default) |
+
+The comparison reflects the default behaviour of each library at the time of writing; the others
+can usually do more through hooks or middleware. `x-requests` is the combination: the typing of
+`openapi-fetch` with the resilience of `ky`/`ofetch`, in one fluent builder.
 
 ## Features
 
 - Fluent, chainable request builder — a request is a thenable, so you simply `await` it.
-- Automatic JSON handling for request bodies and responses.
+- Types per route (manual or generated from OpenAPI) for path params, query, body, responses and errors.
 - Typed errors (`.result()`, `isHttpError`) and typed error bodies per route.
 - Retries with exponential backoff (only for errors that make sense to retry).
-- Per-request timeouts.
+- Per-request timeouts and `.fallback()`.
+- Automatic JSON handling for request bodies and responses.
 - Pluggable `Fetcher` — swap the transport for tests or custom logic.
-- Written in TypeScript with strict types.
+- Written in TypeScript with strict types; ESM-only.
 
 ## Installation
 
@@ -291,6 +316,11 @@ const client = xclient<FromOpenApi<paths>>();
 response to `errors.default`. Optional and required parameters keep their optionality.
 Not mapped: cookie parameters, `head`/`trace` operations.
 
+## Packages
+
+- [`@x-requests/core`](.) — the client.
+- [`@x-requests/codegen`](packages/codegen) — CLI that turns an OpenAPI document into the `paths` types.
+
 ## Scripts
 
 ```bash
@@ -301,3 +331,7 @@ npm run coverage # unit tests with coverage thresholds
 npm run lint     # check code style
 npm run lint:fix # fix code style automatically
 ```
+
+## License
+
+[MIT](LICENSE)
