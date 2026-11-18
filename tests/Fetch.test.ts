@@ -185,7 +185,13 @@ describe('Fetch', () => {
   it('should abort the request if the timeout elapses', async () => {
     globalThis.fetch = ((_url: string, init: RequestInit) =>
       new Promise((_resolve, reject) => {
-        init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        // AbortSignal.timeout() does not keep the event loop alive on its own
+        const keepAlive = setTimeout(() => {}, 1000);
+
+        init.signal?.addEventListener('abort', () => {
+          clearTimeout(keepAlive);
+          reject(init.signal?.reason);
+        });
       })) as typeof fetch;
 
     await assert.rejects(
