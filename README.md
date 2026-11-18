@@ -43,7 +43,7 @@ can usually do more through hooks or middleware. `x-requests` is the combination
 - Fluent, chainable request builder — a request is a thenable, so you simply `await` it.
 - Types per route (manual or generated from OpenAPI) for path params, query, body, responses and errors.
 - Typed errors (`.result()`, `isHttpError`) and typed error bodies per route.
-- Retries with exponential backoff (only for errors that make sense to retry).
+- Retries with exponential backoff (only for errors that make sense to retry) and `.idempotent()` to keep them safe for `POST`.
 - Per-request timeouts, cancellation with `AbortSignal` and `.fallback()`.
 - Server-sent events as a typed async iterable with automatic reconnects.
 - Automatic JSON handling for request bodies and responses, `multipart/form-data` uploads and binary downloads.
@@ -115,7 +115,7 @@ before any request is sent (and is never replaced by `.fallback()`). Use unique 
 | Method                       | Description                                                       |
 | ---------------------------- | ----------------------------------------------------------------- |
 | `.path(data)`                | Values for `{name}` placeholders in the URL.                      |
-| `.body(data)`                | Request body. Objects are serialized to JSON, strings are sent as-is. |
+| `.body(data)`                | Request body. Objects are serialized to JSON, strings, `FormData`, `Blob`, `URLSearchParams` and `ArrayBuffer` are sent as-is. |
 | `.multipart(data)`           | Send `multipart/form-data` from an object or a `FormData` (see [Files](#files)). |
 | `.responseType(kind)`        | Read the response as `'blob'`, `'arrayBuffer'` or `'text'`.       |
 | `.params(data)`              | Query string parameters. `null` and `undefined` values are skipped. |
@@ -132,8 +132,10 @@ request several times never sends it again — the result is cached.
 
 - `application/json` responses are parsed automatically.
 - Other content types are returned as text.
+- `.responseType('blob' | 'arrayBuffer' | 'text')` overrides this for a successful response (see [Files](#files)).
 - `204` / `205` responses resolve to `undefined`.
-- `Content-Type: application/json` is set automatically only when a body is sent.
+- `Content-Type: application/json` is set automatically only when a JSON body (an object, an array or a string) is sent.
+  For `FormData`, `Blob` and `URLSearchParams` it is left to `fetch`.
 
 ### Files
 
