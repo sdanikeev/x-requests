@@ -330,3 +330,21 @@ describe('event typing', () => {
     assert.equal(typeof check, 'function');
   });
 });
+
+describe('responseType typing', () => {
+  it('should type the result by the chosen kind if responseType() is called', () => {
+    const { fetcher } = createFakeFetcher();
+    const client = new XClient(fetcher);
+
+    const blob = client.get('https://example.com').responseType('blob');
+    const buffer = client.get('https://example.com').responseType('arrayBuffer');
+    const text = client.get('https://example.com').responseType('text');
+
+    assertType<Equal<Awaited<typeof blob>, Blob>>();
+    assertType<Equal<Awaited<typeof buffer>, ArrayBuffer>>();
+    assertType<Equal<Awaited<typeof text>, string>>();
+
+    // @ts-expect-error json is the default behavior, not a response type to ask for
+    client.get('https://example.com').responseType('json');
+  });
+});

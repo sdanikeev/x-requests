@@ -6,7 +6,7 @@ import { compose } from '../src/middleware.js';
 import type { Middleware } from '../src/middleware.js';
 import XClient from '../src/XClient.js';
 import xclient from '../src/index.js';
-import { createFakeFetcher, createFlakyFetcher } from './helpers.js';
+import { createFakeFetcher, createFlakyFetcher, createStreamFetcher } from './helpers.js';
 
 describe('compose', () => {
   it('should call the last handler if there are no middlewares', async () => {
@@ -182,5 +182,37 @@ describe('XClient middleware', () => {
 
     assert.equal(result.ok, false);
     assert.ok(result.error instanceof NetworkError);
+  });
+
+  it('should mark the request as a stream for middleware but not for the fetcher if the request is a stream', async () => {
+    const { fetcher, calls } = createStreamFetcher([[]]);
+    const seen: (boolean | undefined)[] = [];
+    const client = new XClient(fetcher);
+
+    client.use((data, next) => {
+      seen.push(data.stream);
+
+      return next(data);
+    });
+
+    for await (const item of client.get('https://example.com/a').stream()) void item;
+
+    assert.deepEqual(seen, [true]);
+    assert.equal('stream' in (calls[0] ?? {}), false);
+  });
+
+  it('should not mark the request as a stream if it is a plain request', async () => {
+    const { fetcher } = createFakeFetcher();
+    const seen: (boolean | undefined)[] = [];
+    const client = new XClient(fetcher);
+
+    client.use((data, next) => {
+      seen.push(data.stream);
+
+      return next(data);
+    });
+    await client.get('https://example.com/a');
+
+    assert.deepEqual(seen, [undefined]);
   });
 });

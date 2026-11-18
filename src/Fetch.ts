@@ -2,16 +2,17 @@ import { stringify } from 'fast-stringify';
 import { AbortError, HttpError, NetworkError, ParseError, TimeoutError } from './errors.js';
 import { parseSse } from './sse.js';
 import { isEmptyResponse } from './statusCodes.js';
-import type { Fetcher, FetcherRequestParams, SseEvent } from './types.js';
+import type { Body, Fetcher, FetcherRequestParams, ResponseContext, ResponseType, SseEvent } from './types.js';
 
 class Fetch implements Fetcher {
   public async request<T = unknown>(
     data: FetcherRequestParams,
+    context?: ResponseContext,
   ): Promise<T> {
     const fetch = await this.getFetch();
 
     const url = this.prepareUrl(data.url, data.params);
-    const headers = this.prepareHeaders(data.headers, Boolean(data.body));
+    const headers = this.prepareHeaders(data.headers, data.body);
 
     const signal = this.prepareSignal(data.signal, data.timeout);
 
@@ -22,23 +23,24 @@ class Fetch implements Fetcher {
         method: (data.method ?? 'GET').toUpperCase(),
         headers,
         ...(signal && { signal }),
-        ...(data.body && {
-          body: typeof data.body === 'string'
-            ? data.body
-            : stringify(data.body),
-        }),
+        ...(data.body && { body: this.prepareBody(data.body) }),
       });
     } catch (error) {
       throw this.toTransportError(error, data.timeout, data.signal);
     }
 
-    return (await this.prepareResult(response)) as T;
+    if (context) {
+      context.status = response.status;
+      context.headers = response.headers;
+    }
+
+    return (await this.prepareResult(response, data.responseType)) as T;
   }
 
-  public async* stream(data: FetcherRequestParams): AsyncGenerator<SseEvent<string>> {
+  public async* stream(data: FetcherRequestParams, context?: ResponseContext): AsyncGenerator<SseEvent<string>> {
     const fetch = await this.getFetch();
 
-    const headers = this.prepareHeaders(data.headers, Boolean(data.body));
+    const headers = this.prepareHeaders(data.headers, data.body);
 
     if (!headers.has('Accept')) headers.set('Accept', 'text/event-stream');
 
@@ -64,14 +66,17 @@ class Fetch implements Fetcher {
           method: (data.method ?? 'GET').toUpperCase(),
           headers,
           signal: controller.signal,
-          ...(data.body && {
-            body: typeof data.body === 'string' ? data.body : stringify(data.body),
-          }),
+          ...(data.body && { body: this.prepareBody(data.body) }),
         });
       } catch (error) {
         throw this.toStreamError(error, data, state.timedOut);
       } finally {
         clearTimeout(timer);
+      }
+
+      if (context) {
+        context.status = response.status;
+        context.headers = response.headers;
       }
 
       if (!response.ok) {
@@ -159,20 +164,38 @@ class Fetch implements Fetcher {
     return url.toString();
   }
 
+  private static isNativeBody(body: Body): body is FormData | URLSearchParams | Blob | ArrayBuffer {
+    return body instanceof FormData
+      || body instanceof URLSearchParams
+      || body instanceof Blob
+      || body instanceof ArrayBuffer;
+  }
+
+  private prepareBody(body: Body): BodyInit {
+    if (typeof body === 'string' || Fetch.isNativeBody(body)) return body;
+
+    return stringify(body);
+  }
+
   private prepareHeaders(
     rawHeaders: FetcherRequestParams['headers'],
-    hasBody: boolean,
+    body: FetcherRequestParams['body'],
   ): Headers {
     const headers = new Headers(rawHeaders as Record<string, string> | undefined);
 
-    if (hasBody && !headers.has('Content-Type')) {
+    // for FormData fetch adds the multipart boundary itself, for Blob and URLSearchParams it adds their own type
+    if (body && !Fetch.isNativeBody(body) && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
 
     return headers;
   }
 
-  private async prepareResult(response: Response) {
+  private async prepareResult(response: Response, responseType?: ResponseType) {
+    if (response.ok && (responseType === 'blob' || responseType === 'arrayBuffer') && !isEmptyResponse(response.status)) {
+      return responseType === 'blob' ? response.blob() : response.arrayBuffer();
+    }
+
     const rawResponse = await response.text();
     const contentType = response.headers.get('Content-Type')?.toLowerCase() ?? '';
     const isJson = contentType.includes('application/json');
@@ -185,7 +208,7 @@ class Fetch implements Fetcher {
       return undefined;
     }
 
-    if (!isJson) {
+    if (!isJson || responseType === 'text') {
       return rawResponse;
     }
 

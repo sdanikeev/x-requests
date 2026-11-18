@@ -46,7 +46,8 @@ can usually do more through hooks or middleware. `x-requests` is the combination
 - Retries with exponential backoff (only for errors that make sense to retry).
 - Per-request timeouts, cancellation with `AbortSignal` and `.fallback()`.
 - Server-sent events as a typed async iterable with automatic reconnects.
-- Automatic JSON handling for request bodies and responses.
+- Automatic JSON handling for request bodies and responses, `multipart/form-data` uploads and binary downloads.
+- Built-in middleware: auth with token refresh, logging, response cache with request deduplication.
 - Pluggable `Fetcher` — swap the transport for tests or custom logic.
 - Written in TypeScript with strict types; ESM-only.
 
@@ -115,10 +116,13 @@ before any request is sent (and is never replaced by `.fallback()`). Use unique 
 | ---------------------------- | ----------------------------------------------------------------- |
 | `.path(data)`                | Values for `{name}` placeholders in the URL.                      |
 | `.body(data)`                | Request body. Objects are serialized to JSON, strings are sent as-is. |
+| `.multipart(data)`           | Send `multipart/form-data` from an object or a `FormData` (see [Files](#files)). |
+| `.responseType(kind)`        | Read the response as `'blob'`, `'arrayBuffer'` or `'text'`.       |
 | `.params(data)`              | Query string parameters. `null` and `undefined` values are skipped. |
 | `.headers(data)`             | Request headers.                                                  |
 | `.timeout(ms)`               | Abort the request (per attempt) after `ms` milliseconds.          |
 | `.retries(count, backoffMs?)`| Retry failed requests up to `count` times. `backoffMs` defaults to `500`. |
+| `.idempotent(key?)`          | Send an `Idempotency-Key` that stays the same on every retry (see [Idempotency](#idempotency)). |
 | `.fallback(value \| fn)`     | Resolve with `value` (or `fn(error)`) instead of throwing when the request finally fails. |
 
 The request is sent on the first `await` (or `.then`). Awaiting the same
@@ -130,6 +134,28 @@ request several times never sends it again — the result is cached.
 - Other content types are returned as text.
 - `204` / `205` responses resolve to `undefined`.
 - `Content-Type: application/json` is set automatically only when a body is sent.
+
+### Files
+
+`.multipart()` builds a `FormData` from a plain object: arrays repeat the field, `null` and `undefined`
+are skipped, a `File` keeps its name and other values are stringified. A ready `FormData`, `Blob`,
+`URLSearchParams` or `ArrayBuffer` can also be passed to `.body()` and is sent as-is.
+
+```ts
+await client.post('/avatars').multipart({
+  userId: 7,
+  tags: ['a', 'b'],
+  file: new File([bytes], 'avatar.png', { type: 'image/png' }),
+});
+
+const report = await client.get('/report.pdf').responseType('blob'); // Blob
+```
+
+- `Content-Type` is not set for these bodies: `fetch` adds the multipart boundary (or the type of the `Blob`) itself.
+- `FormData` and `Blob` can be sent again, so retries work. A `ReadableStream` body is not supported.
+- `.multipart()` is not checked against the route's body type: OpenAPI describes a binary field as `string`, while you pass a `Blob`.
+- `.responseType()` changes only how a successful response is read; error bodies are still parsed as before.
+- The `node-fetch` fallback (old Node versions) does not guarantee `FormData` support.
 
 ### Retries
 
@@ -146,6 +172,21 @@ Only the following failures are retried:
 Other `4xx` responses and validation errors are thrown immediately.
 
 `retries` must be at least `1` and cannot exceed `config.maxRetries` if it is set.
+
+### Idempotency
+
+Retrying a `POST` can run it twice if the first attempt reached the server but the response got lost.
+`.idempotent()` sends an `Idempotency-Key` header so that the server can recognise the repeat:
+
+```ts
+await client.post('/payments').body(order).idempotent().retries(3); // random UUID, same on every attempt
+await client.post('/payments').body(order).idempotent(`order-${order.id}`); // or your own key
+```
+
+- The key is created once per request, so retries and stream reconnects carry the same one; two requests get different keys.
+- A header of the same name set with `.headers()` is never overwritten.
+- Use another header name with `xclient({ config: { idempotencyHeader: 'X-Request-Id' } })`.
+- The server has to support the header: the client only sends it. There is no client-side cache here, see `cacheMiddleware`.
 
 ### Fallback
 
@@ -293,6 +334,48 @@ Middlewares can also be passed up front: `xclient({ config: { middleware: [...] 
 - Middlewares added later apply to the requests made after that; each client has its own list.
 - An error thrown by a middleware goes through the same rules as a fetcher error (`NetworkError`, retries).
 - A middleware sees the plain request and the raw response (`unknown`), not the types of a route.
+- A middleware gets a third argument, `context`, with the `status` and `headers` of the response. It is filled while `next` runs,
+  so read it after `await next(data)`. A custom fetcher that does not fill it leaves it empty.
+
+#### Built-in middleware
+
+```ts
+import xclient, { authMiddleware, cacheMiddleware, loggerMiddleware } from '@x-requests/core';
+
+const client = xclient({
+  config: {
+    baseUrl: 'https://api.example.com',
+    middleware: [
+      loggerMiddleware(),
+      authMiddleware({ getToken: () => session.token, refresh: async () => (session.token = await renewToken()) }),
+      cacheMiddleware({ ttl: 30_000 }), // after auth: the Authorization header becomes part of the cache key
+    ],
+  },
+});
+```
+
+**`authMiddleware({ getToken, refresh?, scheme?, header? })`** adds `Authorization: Bearer <token>`.
+On a `401` it calls `refresh()` once for all parallel requests and repeats the failed request once;
+`refresh` should store the new token so that `getToken` returns it. A header set on the request itself is never replaced.
+A `.stream()` that is refused with `401` before its first event is reconnected once with the new token.
+After the first event a `401` is passed on, because repeating the request would duplicate events.
+
+**`loggerMiddleware({ log?, redactHeaders? })`** reports every attempt (so retries are logged one by one) as
+`{ method, url, headers, durationMs, ok, status?, error?, stream }`. `status` comes from the response, also for
+a successful one, when the fetcher reports it (the default one does; see [Custom fetcher](#custom-fetcher)).
+Bodies are not logged; `authorization`, `cookie`, `set-cookie` and `proxy-authorization` are redacted by default.
+A stream is logged once, when it ends. Without `log` it writes one line to `console.info`.
+
+**`cacheMiddleware({ ttl, methods?, maxEntries?, vary?, key?, clone?, respectCacheControl? })`**
+- Reuses successful `GET` responses for `ttl` ms. The key is the method, url, query and the headers from `vary` (default `authorization`).
+- Follows the `Cache-Control` of the response: `no-store`, `no-cache` and `max-age=0` skip the cache, `max-age` can only shorten `ttl`
+  (turn it off with `respectCacheControl: false`). This needs a fetcher that reports headers; without them `ttl` is used.
+- Identical requests made at the same time share one call. Aborting a request ends only its own wait;
+  the shared call is cancelled when every request waiting for it has been aborted.
+- Failures are not cached. A successful `POST`/`PUT`/`PATCH`/`DELETE` drops the entries of its url.
+- Objects are cloned for every caller (`clone: false` shares the instance). The least recently used entry is dropped above `maxEntries` (500).
+- `cache.clear()` and `cache.invalidate(url)` drop entries by hand, for example on logout.
+- Streams are never cached.
 
 ### Custom fetcher
 
@@ -310,6 +393,23 @@ const fetcher: Fetcher = {
 };
 
 const client = xclient({ fetcher });
+```
+
+A fetcher may take a second argument, `context`, and fill it with `status` and `headers` of the response
+(also of an error response, before it throws). Middleware reads them: the logger reports the status of a
+successful response and the cache follows `Cache-Control`. It is optional: without it those features fall back
+(no status for a success, `ttl` as is).
+
+```ts
+const fetcher: Fetcher = {
+  async request(data, context) {
+    const response = await fetch(data.url);
+
+    if (context) Object.assign(context, { status: response.status, headers: response.headers });
+
+    return response.json() as never;
+  },
+};
 ```
 
 ## Typed routes

@@ -29,6 +29,8 @@ src/
   middleware.ts         Middleware/Next types and compose()
   sse.ts                SSE parser (parseSse)
   errors.ts             HttpError, NetworkError, TimeoutError, ParseError, AbortError, ValidationError
+  middlewares/          built-in middleware: authMiddleware, loggerMiddleware, cacheMiddleware
+  headers.ts            case-insensitive hasHeader()
   routes.ts             route typing (RouteDef, RegisteredRoutes, EventOf, ...)
   openapi.ts            FromOpenApi: maps openapi-typescript `paths` to routes
   statusCodes.ts, types.ts
@@ -55,6 +57,11 @@ examples/               openapi.json + generated_v1.ts (used by tests/openapi.te
 - `.fallback()` replaces failures but never hides `ValidationError` or `AbortError`.
 - Middleware is an onion around the `Fetcher`, so it runs on **every attempt** of a retried request. `onRequest` runs in registration order, `onResponse` in reverse. Each client owns its own list; `use()` returns an unsubscribe function.
 - Cancellation: `.signal(AbortSignal)`; combined with `.timeout()` via `AbortSignal.any` (manual fallback for Node < 20.3). Abort also interrupts the backoff pause.
+- Files: `.multipart()` builds a `FormData` (not checked against the route body type); `Fetch` sets no `Content-Type` for `FormData`/`Blob`/`URLSearchParams` so that `fetch` adds the boundary. `.responseType()` only changes how a successful response is read.
+- `.idempotent(key?)` creates the key once, so every retry and stream reconnect sends the same `Idempotency-Key` (`Config.idempotencyHeader` renames it). The client does not deduplicate; caching is `cacheMiddleware`.
+- `MiddlewareFetcher.stream()` passes `stream: true` to the chain (and strips it before the `Fetcher`), because `next()` of a stream returns a generator that is not started yet. Middleware that must treat streams differently (cache, logger, auth) checks `data.stream`.
+- `ResponseContext` is an out-parameter: `MiddlewareFetcher` creates one per attempt, passes it to the `Fetcher` as the second argument and to every middleware as the third. `Fetch` fills `status`/`headers` (also for error responses); custom fetchers may ignore it, so middleware must work with an empty one.
+- `cacheMiddleware` shares one in-flight call per key with its own `AbortController`; a caller's abort ends only its own wait (`join`/`leave`), the call is aborted when the last waiter leaves. `authMiddleware` reconnects a stream on a 401 only before its first event (later it would duplicate events).
 - SSE: `.stream()` returns an async generator. `data` is parsed as JSON unless `{ json: false }`. Reconnects after failures up to `.retries(n, backoff)` with `Last-Event-ID` and the server's `retry:` hint; a normally closed stream just ends. `.timeout()` only limits the wait for the connection.
 - `FromOpenApi` maps a `text/event-stream` response to `events`: a union of `{ event, data }` objects gives named events, any other schema gives `{ message: ... }`. This is our convention, not an OpenAPI standard (OpenAPI 3.2 `itemSchema` is not supported by openapi-typescript 7.13).
 - `openapi-typescript` is an optional peer dependency of the codegen package; it is a devDependency at the root, with an `overrides` entry because it declares `typescript ^5` while the repo uses TS 6.

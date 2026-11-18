@@ -1,4 +1,5 @@
 import { AbortError, HttpError, ParseError, ValidationError, toRequestError } from './errors.js';
+import { hasHeader } from './headers.js';
 import { isRetryableStatus } from './statusCodes.js';
 import type { RequestError } from './errors.js';
 import type { DefaultInput, RequestInput, Result } from './routes.js';
@@ -12,8 +13,13 @@ import type {
   Method,
   Fetcher,
   FetcherRequestParams,
+  ResponseType,
   SseEvent,
 } from './types.js';
+
+type MultipartScalar = string | number | boolean | Blob;
+
+export type MultipartValue = MultipartScalar | readonly MultipartScalar[] | null | undefined;
 
 class XRequest<
   T = unknown,
@@ -29,6 +35,8 @@ class XRequest<
     retries?: number;
     backoffMs?: number;
     signal?: AbortSignal;
+    responseType?: ResponseType;
+    idempotencyKey?: string;
   } = {};
 
   private fallbackHandler: ((error: unknown) => unknown) | undefined;
@@ -58,6 +66,47 @@ class XRequest<
     return this;
   }
 
+  /**
+   * Sends `multipart/form-data`. An object is converted to `FormData`: arrays repeat the field,
+   * `null` and `undefined` are skipped, a `File` keeps its name, other values are stringified.
+   *
+   *   client.post('/upload').multipart({ file: new File([bytes], 'a.png'), tags: ['x', 'y'] });
+   */
+  public multipart(data: FormData | Record<string, MultipartValue>) {
+    this.requestData.body = data instanceof FormData ? data : XRequest.toFormData(data);
+
+    return this;
+  }
+
+  private static toFormData(fields: Record<string, MultipartValue>): FormData {
+    const form = new FormData();
+
+    for (const [name, value] of Object.entries(fields)) {
+      if (value === undefined || value === null) continue;
+
+      for (const item of Array.isArray(value) ? value as MultipartScalar[] : [value as MultipartScalar]) {
+        if (item instanceof Blob) form.append(name, item);
+        else form.append(name, String(item));
+      }
+    }
+
+    return form;
+  }
+
+  /**
+   * Reads the response as binary (`'blob'`, `'arrayBuffer'`) or as raw `'text'`, bypassing JSON parsing.
+   *
+   *   const file = await client.get('/report').responseType('blob');
+   */
+  public responseType(kind: 'blob'): XRequest<Blob, In, E, Ev>;
+  public responseType(kind: 'arrayBuffer'): XRequest<ArrayBuffer, In, E, Ev>;
+  public responseType(kind: 'text'): XRequest<string, In, E, Ev>;
+  public responseType(kind: ResponseType): XRequest<unknown, In, E, Ev> {
+    this.requestConfig.responseType = kind;
+
+    return this as unknown as XRequest<unknown, In, E, Ev>;
+  }
+
   public path(data: In['path']) {
     this.requestData.path = data as PathParams;
 
@@ -84,6 +133,24 @@ class XRequest<
 
   public signal(signal: AbortSignal) {
     this.requestConfig.signal = signal;
+
+    return this;
+  }
+
+  /**
+   * Sends an idempotency key (`Idempotency-Key` by default, see `Config.idempotencyHeader`) so that
+   * the server can tell a retry from a new request. The key is created once, so every attempt of
+   * this request (retries, stream reconnects) carries the same one. Meant for POST and PATCH.
+   * A header of the same name set with `.headers()` wins.
+   *
+   *   await client.post('/payments').body(order).idempotent().retries(3);
+   */
+  public idempotent(key?: string) {
+    if (key !== undefined && key.trim() === '') {
+      throw new ValidationError('The idempotency key must not be empty');
+    }
+
+    this.requestConfig.idempotencyKey = key ?? crypto.randomUUID();
 
     return this;
   }
@@ -230,7 +297,19 @@ class XRequest<
     return this.fetcher.request(this.buildRequest());
   }
 
-  private buildRequest(headers = this.requestData.headers): FetcherRequestParams {
+  private withIdempotencyKey(headers: HeadersData | undefined): HeadersData | undefined {
+    const key = this.requestConfig.idempotencyKey;
+
+    if (key === undefined) return headers;
+
+    const name = this.globalConfig?.idempotencyHeader ?? 'Idempotency-Key';
+
+    return hasHeader(headers, name) ? headers : { ...headers, [name]: key };
+  }
+
+  private buildRequest(rawHeaders = this.requestData.headers): FetcherRequestParams {
+    const headers = this.withIdempotencyKey(rawHeaders);
+
     return {
       url: this.resolveUrl(),
       method: this.requestData.method!,
@@ -248,6 +327,9 @@ class XRequest<
       }),
       ...(this.requestConfig.signal && {
         signal: this.requestConfig.signal,
+      }),
+      ...(this.requestConfig.responseType && {
+        responseType: this.requestConfig.responseType,
       }),
     };
   }

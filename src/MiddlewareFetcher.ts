@@ -1,7 +1,7 @@
 import { compose } from './middleware.js';
 import type { Middleware } from './middleware.js';
 import { ValidationError } from './errors.js';
-import type { Fetcher, FetcherRequestParams, SseEvent } from './types.js';
+import type { Fetcher, FetcherRequestParams, ResponseContext, SseEvent } from './types.js';
 
 class MiddlewareFetcher implements Fetcher {
   constructor(
@@ -10,7 +10,8 @@ class MiddlewareFetcher implements Fetcher {
   ) { }
 
   request<T = unknown>(data: FetcherRequestParams): Promise<T> {
-    const run = compose(this.middlewares, _data => this.fetcher.request(_data));
+    const context: ResponseContext = {};
+    const run = compose(this.middlewares, _data => this.fetcher.request(_data, context), context);
 
     return run(data) as Promise<T>;
   }
@@ -20,9 +21,15 @@ class MiddlewareFetcher implements Fetcher {
 
     if (!fetcher.stream) throw new ValidationError('The fetcher does not support streaming');
 
-    const run = compose(this.middlewares, async _data => fetcher.stream!(_data));
+    const context: ResponseContext = {};
+    const run = compose(
+      this.middlewares,
+      async ({ stream: _stream, ..._data }) => fetcher.stream!(_data, context),
+      context,
+    );
 
-    yield* (await run(data)) as AsyncIterable<SseEvent<string>>;
+    // the generator returned by `next()` is not started yet: a middleware sees the connection only through this flag
+    yield* (await run({ ...data, stream: true })) as AsyncIterable<SseEvent<string>>;
   }
 }
 

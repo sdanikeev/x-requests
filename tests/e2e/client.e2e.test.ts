@@ -1,8 +1,9 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import xclient, { AbortError, HttpError, HttpStatus, isHttpError } from '../../src/index.js';
+import xclient, { AbortError, HttpError, HttpStatus, authMiddleware, cacheMiddleware, isHttpError, loggerMiddleware } from '../../src/index.js';
 import type { ServerResponse } from 'node:http';
+import type { LogEntry } from '../../src/index.js';
 import { sendJson, sleep, startServer } from './server.js';
 
 type Item = { id: number; name: string };
@@ -24,6 +25,13 @@ interface Routes {
   '/text': { get: { response: string } };
   '/empty': { delete: { response: undefined } };
   '/echo': { post: { body: Record<string, unknown>; response: { length: number; data: string } } };
+  '/upload': { post: { response: { contentType: string; body: string } } };
+  '/payments': { post: { response: { key: string | null; attempt: number } } };
+  '/secure': { get: { response: { user: string } } };
+  '/no-store': { get: { response: { hit: number } } };
+  '/sse/secure': { get: { events: { tick: { n: number } } } };
+  '/cached': { get: { response: { hit: number } } };
+  '/download': { get: { response: unknown } };
   '/headers': { get: { response: Record<string, string | null> } };
   '/flaky/{id}': { get: { path: { id: number }; response: { ok: true; attempt: number } } };
   '/always-503': { get: { response: never; errors: { default: { message: string } } } };
@@ -72,6 +80,28 @@ describe('e2e: client against a real HTTP server', () => {
         res.end();
       },
       '/echo': ({ res, body }) => sendJson(res, 200, { length: body.length, data: body }),
+      '/upload': ({ req, res, body }) => sendJson(res, 200, { contentType: req.headers['content-type'] ?? '', body }),
+      '/payments': ({ req, res, hit }) => hit === 1
+        ? sendJson(res, 503, { message: 'try later' })
+        : sendJson(res, 200, { key: (req.headers['idempotency-key'] as string | undefined) ?? null, attempt: hit }),
+      '/secure': ({ req, res }) => req.headers.authorization === 'Bearer fresh'
+        ? sendJson(res, 200, { user: 'me' })
+        : sendJson(res, 401, { message: 'expired' }),
+      '/cached': ({ res, hit }) => sendJson(res, 200, { hit }),
+      '/no-store': ({ res, hit }) => {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ hit }));
+      },
+      '/sse/secure': ({ req, res }) => {
+        if (req.headers.authorization !== 'Bearer fresh') return sendJson(res, 401, { message: 'expired' });
+
+        sse(res);
+        res.end('event: tick\ndata: {"n":1}\n\n');
+      },
+      '/download': ({ res }) => {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(Buffer.from([0, 1, 2, 255]));
+      },
       '/headers': ({ req, res }) => sendJson(res, 200, {
         contentType: req.headers['content-type'] ?? null,
         custom: (req.headers['x-custom'] as string | undefined) ?? null,
@@ -168,6 +198,133 @@ describe('e2e: client against a real HTTP server', () => {
       const result = await client.post('/echo').body({ big });
 
       assert.equal(JSON.parse(result.data).big.length, big.length);
+    });
+  });
+
+  describe('files', () => {
+    it('should send a multipart body with a boundary and the file if multipart() is used', async () => {
+      const result = await client.post('/upload').multipart({
+        title: 'cat',
+        file: new File(['file-content'], 'cat.txt', { type: 'text/plain' }),
+      });
+
+      assert.match(result.contentType, /^multipart\/form-data; boundary=/);
+      assert.match(result.body, /name="title"\r\n\r\ncat/);
+      assert.match(result.body, /name="file"; filename="cat.txt"/);
+      assert.match(result.body, /file-content/);
+    });
+
+    it('should return the exact bytes if responseType is blob', async () => {
+      const blob = await client.get('/download').responseType('blob');
+
+      assert.deepEqual([...new Uint8Array(await blob.arrayBuffer())], [0, 1, 2, 255]);
+    });
+  });
+
+  describe('idempotency', () => {
+    it('should send the key on the retried request if the first attempt failed', async () => {
+      const result = await client.post('/payments').idempotent('order-1').retries(2, 1);
+
+      assert.deepEqual(result, { key: 'order-1', attempt: 2 });
+    });
+  });
+
+  describe('built-in middleware', () => {
+    it('should refresh the token once and succeed if parallel requests get 401', async () => {
+      let token = 'stale';
+      let refreshed = 0;
+      const secured = xclient<Routes>({
+        config: {
+          baseUrl: server.url,
+          middleware: [
+            authMiddleware({
+              getToken: () => token,
+              refresh: async () => {
+                refreshed++;
+                await sleep(10);
+                token = 'fresh';
+
+                return token;
+              },
+            }),
+          ],
+        },
+      });
+
+      const results = await Promise.all([secured.get('/secure'), secured.get('/secure'), secured.get('/secure')]);
+
+      assert.deepEqual(results, [{ user: 'me' }, { user: 'me' }, { user: 'me' }]);
+      assert.equal(refreshed, 1);
+    });
+
+    it('should send one request to the server if cacheMiddleware gets identical GETs', async () => {
+      const cached = xclient<Routes>({
+        config: { baseUrl: server.url, middleware: [cacheMiddleware({ ttl: 5000 })] },
+      });
+      const before = server.hitsOf('/cached');
+
+      const results = await Promise.all([cached.get('/cached'), cached.get('/cached')]);
+      const later = await cached.get('/cached');
+
+      assert.deepEqual(results[0], results[1]);
+      assert.deepEqual(later, results[0]);
+      assert.equal(server.hitsOf('/cached') - before, 1);
+    });
+  });
+
+  describe('response metadata for middleware', () => {
+    it('should log the real status of a successful response if loggerMiddleware is used', async () => {
+      const entries: LogEntry[] = [];
+      const logged = xclient<Routes>({
+        config: { baseUrl: server.url, middleware: [loggerMiddleware({ log: entry => entries.push(entry) })] },
+      });
+
+      await logged.post('/items').body({ name: 'x' });
+
+      assert.equal(entries[0]?.status, 201);
+    });
+
+    it('should not cache a response if the server says no-store', async () => {
+      const cached = xclient<Routes>({
+        config: { baseUrl: server.url, middleware: [cacheMiddleware({ ttl: 5000 })] },
+      });
+      const before = server.hitsOf('/no-store');
+
+      await cached.get('/no-store');
+      await cached.get('/no-store');
+
+      assert.equal(server.hitsOf('/no-store') - before, 2);
+    });
+
+    it('should reconnect a stream with a new token if the server answers 401', async () => {
+      let token = 'stale';
+      const secured = xclient<Routes>({
+        config: {
+          baseUrl: server.url,
+          middleware: [authMiddleware({ getToken: () => token, refresh: () => (token = 'fresh') })],
+        },
+      });
+      const received: unknown[] = [];
+
+      for await (const item of secured.get('/sse/secure').stream()) received.push(item.data);
+
+      assert.deepEqual(received, [{ n: 1 }]);
+    });
+
+    it('should keep the request of another caller alive if the first one is aborted while a shared call is pending', async () => {
+      const cached = xclient<Routes>({
+        config: { baseUrl: server.url, middleware: [cacheMiddleware({ ttl: 5000 })] },
+      });
+      const controller = new AbortController();
+
+      const first = cached.get('/slow').signal(controller.signal).result();
+      const second = cached.get('/slow').result();
+
+      await sleep(20);
+      controller.abort();
+
+      assert.equal((await first).ok, false);
+      assert.deepEqual(await second, { ok: true, data: { ok: true } });
     });
   });
 
