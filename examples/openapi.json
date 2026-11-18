@@ -283,6 +283,95 @@
           }
         }
       }
+    },
+    "/events": {
+      "get": {
+        "operationId": "streamEvents",
+        "summary": "Server-sent events with named events",
+        "responses": {
+          "200": {
+            "description": "event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "event",
+                        "data"
+                      ],
+                      "properties": {
+                        "event": {
+                          "type": "string",
+                          "enum": [
+                            "tick"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "required": [
+                            "n"
+                          ],
+                          "properties": {
+                            "n": {
+                              "type": "integer"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "event",
+                        "data"
+                      ],
+                      "properties": {
+                        "event": {
+                          "type": "string",
+                          "enum": [
+                            "done"
+                          ]
+                        },
+                        "data": {
+                          "type": "object",
+                          "required": [
+                            "total"
+                          ],
+                          "properties": {
+                            "total": {
+                              "type": "integer"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/messages": {
+      "get": {
+        "operationId": "streamMessages",
+        "summary": "Server-sent events without event names (plain data schema)",
+        "responses": {
+          "200": {
+            "description": "message stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -392,6 +481,17 @@
                 "type": "string"
               }
             }
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
           }
         }
       }

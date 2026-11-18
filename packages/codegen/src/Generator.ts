@@ -22,12 +22,12 @@ export default class Generator {
 
   async generate(): Promise<void> {
     const { from, to } = this.options;
-    const { default: openapiTS, astToString } = await loadOpenApiTs();
+    const { default: openapiTS, astToString, COMMENT_HEADER } = await loadOpenApiTs();
 
     const source = isUrl(from) ? new URL(from) : pathToFileURL(resolve(from));
     const ast = await openapiTS(source);
 
     await mkdir(dirname(resolve(to)), { recursive: true });
-    await writeFile(to, astToString(ast));
+    await writeFile(to, COMMENT_HEADER + astToString(ast));
   }
 }

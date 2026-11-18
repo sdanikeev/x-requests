@@ -388,6 +388,18 @@ const client = xclient<FromOpenApi<paths>>();
 response to `errors.default`. Optional and required parameters keep their optionality.
 Not mapped: cookie parameters, `head`/`trace` operations.
 
+A `text/event-stream` response is mapped to `events` (and not to `response`, unless the response also has other content):
+
+- a schema that is a union of `{ event: 'name'; data: ... }` objects declares named events:
+  `oneOf: [{ properties: { event: { enum: ['tick'] }, data: ... } }, ...]` becomes `events: { tick: ... }`;
+- any other schema describes the `data` of unnamed events and becomes `events: { message: ... }`.
+
+```ts
+for await (const event of client.get('/events').stream()) {
+  if (event.event === 'tick') event.data; // typed from the schema
+}
+```
+
 ## Packages
 
 - [`@x-requests/core`](.) — the client.

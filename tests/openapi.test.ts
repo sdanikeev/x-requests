@@ -5,7 +5,7 @@ import type { components, paths } from '../examples/generated_v1.js';
 import type { FromOpenApi } from '../src/openapi.js';
 import { HttpError, isHttpError } from '../src/errors.js';
 import XClient from '../src/XClient.js';
-import { createFakeFetcher, createFlakyFetcher } from './helpers.js';
+import { createFakeFetcher, createFlakyFetcher, createStreamFetcher, event } from './helpers.js';
 
 // Compile-time assertions: a mistake here fails `tsc` (and thus `npm test`).
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
@@ -21,7 +21,7 @@ type Routes = FromOpenApi<paths>;
 
 describe('FromOpenApi', () => {
   it('should keep all paths if the schema is converted', () => {
-    assertType<Equal<keyof Routes, '/ping' | '/users' | '/users/{id}' | '/companies/{companyId}/users/{userId}'>>();
+    assertType<Equal<keyof Routes, '/ping' | '/users' | '/users/{id}' | '/companies/{companyId}/users/{userId}' | '/events' | '/messages'>>();
   });
 
   it('should drop missing methods (put?: never) and the parameters key if the schema is converted', () => {
@@ -184,5 +184,69 @@ describe('FromOpenApi + client', () => {
     void (() => client.get('/users').params({ role: 'root' }));
     // @ts-expect-error — path param is required
     void (() => client.get('/users/{id}'));
+  });
+});
+
+describe('FromOpenApi + server-sent events', () => {
+  type Message = components['schemas']['Message'];
+
+  it('should map a union of { event, data } objects to named events if the response is text/event-stream', () => {
+    assertType<Equal<Routes['/events']['get']['events'], { tick: { n: number }; done: { total: number } }>>();
+  });
+
+  it('should not declare a response if the response is only text/event-stream', () => {
+    assertType<Equal<'response' extends keyof Routes['/events']['get'] ? true : false, false>>();
+    assertType<Equal<'response' extends keyof Routes['/messages']['get'] ? true : false, false>>();
+  });
+
+  it('should map a plain schema to message events if the schema has no event names', () => {
+    assertType<Equal<Routes['/messages']['get']['events'], { message: Message }>>();
+  });
+
+  it('should keep the other content as response and add events if the response is negotiated', () => {
+    type Mixed = FromOpenApi<{
+      '/mixed': {
+        get: {
+          responses: {
+            200: {
+              content: {
+                'application/json': { total: number };
+                'text/event-stream': { event: 'tick'; data: { n: number } };
+              };
+            };
+          };
+        };
+      };
+    }>;
+
+    assertType<Equal<Mixed['/mixed']['get']['response'], { total: number }>>();
+    assertType<Equal<Mixed['/mixed']['get']['events'], { tick: { n: number } }>>();
+  });
+
+  it('should not add events if the response has no text/event-stream content', () => {
+    assertType<Equal<'events' extends keyof Routes['/ping']['get'] ? true : false, false>>();
+    assertType<Equal<'events' extends keyof Routes['/users']['get'] ? true : false, false>>();
+  });
+
+  it('should type the stream of the client from the generated schema if stream() is called', async () => {
+    const { fetcher } = createStreamFetcher([[
+      event('{"n":1}', { event: 'tick' }),
+      event('{"total":1}', { event: 'done' }),
+    ]]);
+    const client = new XClient<Routes>(fetcher);
+    const names: string[] = [];
+
+    for await (const item of client.get('/events').stream()) {
+      names.push(item.event);
+
+      if (item.event === 'tick') assertType<Equal<typeof item.data, { n: number }>>();
+      if (item.event === 'done') assertType<Equal<typeof item.data, { total: number }>>();
+    }
+
+    for await (const item of client.get('/messages').stream({ json: false })) {
+      assertType<Equal<typeof item.data, string>>();
+    }
+
+    assert.deepEqual(names, ['tick', 'done']);
   });
 });

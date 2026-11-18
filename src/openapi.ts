@@ -22,6 +22,7 @@ type RouteOf<Operation> = Simplify<
   & ParamsPart<Operation, 'path', 'path'>
   & BodyOf<Operation>
   & ResponseOf<Operation>
+  & EventsOf<Operation>
   & ErrorsOf<Operation>
 >;
 
@@ -67,9 +68,43 @@ type SuccessStatuses<R> = {
   [S in keyof R]: StatusKey<S> extends `2${string}` ? S : never;
 }[keyof R];
 
+type SuccessResponses<Operation> = ResponsesOf<Operation>[SuccessStatuses<ResponsesOf<Operation>>];
+
+type EVENT_STREAM = 'text/event-stream';
+
+type EventStreamOf<ResponseObject> = ResponseObject extends { content?: infer Content }
+  ? [Defined<Content>] extends [never]
+      ? never
+      : EVENT_STREAM extends keyof Defined<Content> ? Defined<Content>[EVENT_STREAM] : never
+  : never;
+
+type OnlyEventStream<ResponseObject> = ResponseObject extends { content?: infer Content }
+  ? [Defined<Content>] extends [never]
+      ? false
+      : [Exclude<keyof Defined<Content>, EVENT_STREAM>] extends [never] ? true : false
+  : false;
+
+type WithoutEventStream<ResponseObject> = ResponseObject extends { content?: infer Content }
+  ? { content: Omit<Defined<Content>, EVENT_STREAM> }
+  : ResponseObject;
+
 type ResponseOf<Operation> = [SuccessStatuses<ResponsesOf<Operation>>] extends [never]
   ? unknown
-  : { response: PayloadOf<ResponsesOf<Operation>[SuccessStatuses<ResponsesOf<Operation>>]> };
+  : [EventStreamOf<SuccessResponses<Operation>>] extends [never]
+      ? { response: PayloadOf<SuccessResponses<Operation>> }
+      : OnlyEventStream<SuccessResponses<Operation>> extends true
+        ? unknown
+        : { response: PayloadOf<WithoutEventStream<SuccessResponses<Operation>>> };
+
+// A schema that is a union of `{ event: 'name'; data: ... }` objects describes named events,
+// any other schema describes the `data` of unnamed (`message`) events.
+type EventMap<Payload> = [Payload] extends [{ event: string; data: unknown }]
+  ? { [Name in Payload['event']]: Extract<Payload, { event: Name }>['data'] }
+  : { message: Payload };
+
+type EventsOf<Operation> = [EventStreamOf<SuccessResponses<Operation>>] extends [never]
+  ? unknown
+  : { events: Simplify<EventMap<EventStreamOf<SuccessResponses<Operation>>>> };
 
 type ErrorStatuses<R> = {
   [S in keyof R]: StatusKey<S> extends `4${string}` | `5${string}` ? S : never;
