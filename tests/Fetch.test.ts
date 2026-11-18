@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { HttpError, NetworkError, TimeoutError } from '../src/errors.js';
 import Fetch from '../src/Fetch.js';
+import { hangingFetch } from './helpers.js';
 
 type Call = { url: string; init: RequestInit };
 
@@ -183,16 +184,7 @@ describe('Fetch', () => {
   });
 
   it('should abort the request if the timeout elapses', async () => {
-    globalThis.fetch = ((_url: string, init: RequestInit) =>
-      new Promise((_resolve, reject) => {
-        // AbortSignal.timeout() does not keep the event loop alive on its own
-        const keepAlive = setTimeout(() => {}, 1000);
-
-        init.signal?.addEventListener('abort', () => {
-          clearTimeout(keepAlive);
-          reject(init.signal?.reason);
-        });
-      })) as typeof fetch;
+    globalThis.fetch = hangingFetch;
 
     await assert.rejects(
       new Fetch().request({ method: 'get', url: 'https://example.com', timeout: 10 }),

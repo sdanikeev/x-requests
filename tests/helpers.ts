@@ -31,3 +31,15 @@ export const createFlakyFetcher = (
 
   return { fetcher, calls };
 };
+
+// A fetch that never responds and rejects once its signal is aborted.
+// AbortSignal.timeout() is unref'd, so the pending timer alone would let the event loop exit.
+export const hangingFetch = ((_url: string, init: RequestInit) =>
+  new Promise((_resolve, reject) => {
+    const keepAlive = setTimeout(() => {}, 1000);
+
+    init.signal?.addEventListener('abort', () => {
+      clearTimeout(keepAlive);
+      reject(init.signal?.reason);
+    });
+  })) as typeof fetch;

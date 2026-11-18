@@ -13,7 +13,7 @@ import {
 } from '../src/errors.js';
 import Fetch from '../src/Fetch.js';
 import XRequest from '../src/XRequest.js';
-import { createFakeFetcher, createFlakyFetcher } from './helpers.js';
+import { createFakeFetcher, createFlakyFetcher, hangingFetch } from './helpers.js';
 
 const realFetch = globalThis.fetch;
 
@@ -123,10 +123,7 @@ describe('errors from Fetch', () => {
   });
 
   it('should throw TimeoutError with timeoutMs if the request times out', async () => {
-    globalThis.fetch = ((_url: string, init: RequestInit) =>
-      new Promise((_resolve, reject) => {
-        init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
-      })) as typeof fetch;
+    globalThis.fetch = hangingFetch;
 
     await assert.rejects(
       new Fetch().request({ method: 'get', url: 'https://example.com', timeout: 10 }),
