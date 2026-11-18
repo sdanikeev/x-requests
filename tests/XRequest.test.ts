@@ -6,7 +6,7 @@ import { HttpError } from '../src/errors.js';
 import { createFakeFetcher, createFlakyFetcher } from './helpers.js';
 
 describe('XRequest', () => {
-  it('отправляет method и url в fetcher', async () => {
+  it('should send method and url to the fetcher if the request is awaited', async () => {
     const { fetcher, calls } = createFakeFetcher();
 
     await new XRequest(fetcher, 'get', 'https://example.com/users');
@@ -16,7 +16,7 @@ describe('XRequest', () => {
     assert.equal(calls[0]?.url, 'https://example.com/users');
   });
 
-  it('пробрасывает body, params и headers', async () => {
+  it('should pass body, params and headers to the fetcher if they are set', async () => {
     const { fetcher, calls } = createFakeFetcher();
 
     await new XRequest(fetcher, 'post', 'https://example.com/users')
@@ -29,7 +29,7 @@ describe('XRequest', () => {
     assert.deepEqual(calls[0]?.headers, { Authorization: 'Bearer x' });
   });
 
-  it('не добавляет body/params/headers, если они не заданы', async () => {
+  it('should not add body, params or headers if they are not set', async () => {
     const { fetcher, calls } = createFakeFetcher();
 
     await new XRequest(fetcher, 'get', 'https://example.com');
@@ -39,7 +39,7 @@ describe('XRequest', () => {
     assert.ok(!('headers' in calls[0]!));
   });
 
-  it('возвращает ответ fetcher через await', async () => {
+  it('should return the fetcher response if the request is awaited', async () => {
     const { fetcher } = createFakeFetcher({ id: 1 });
 
     const result = await new XRequest(fetcher, 'get', 'https://example.com');
@@ -47,7 +47,7 @@ describe('XRequest', () => {
     assert.deepEqual(result, { id: 1 });
   });
 
-  it('builder-методы возвращают this (цепочка)', () => {
+  it('should return this from builder methods if they are chained', () => {
     const { fetcher } = createFakeFetcher();
     const req = new XRequest(fetcher, 'get', 'https://example.com');
 
@@ -57,7 +57,7 @@ describe('XRequest', () => {
     assert.equal(req.timeout(100), req);
   });
 
-  it('склеивает относительный url с baseUrl', async () => {
+  it('should join a relative url with baseUrl if baseUrl is set', async () => {
     const { fetcher, calls } = createFakeFetcher();
 
     await new XRequest(fetcher, 'get', '/users', { baseUrl: 'https://example.com' });
@@ -65,7 +65,7 @@ describe('XRequest', () => {
     assert.equal(calls[0]?.url, 'https://example.com/users');
   });
 
-  it('сохраняет путь из baseUrl (/api/v1)', async () => {
+  it('should keep the path of baseUrl if it has one (/api/v1)', async () => {
     const { fetcher, calls } = createFakeFetcher();
 
     await new XRequest(fetcher, 'get', 'users', { baseUrl: 'https://example.com/api/v1/' });
@@ -73,7 +73,7 @@ describe('XRequest', () => {
     assert.equal(calls[0]?.url, 'https://example.com/api/v1/users');
   });
 
-  it('ошибка при пустом url', async () => {
+  it('should throw if the url is empty', async () => {
     const { fetcher } = createFakeFetcher();
 
     await assert.rejects(async () => {
@@ -81,7 +81,7 @@ describe('XRequest', () => {
     });
   });
 
-  it('запрос выполняется один раз при нескольких await', async () => {
+  it('should execute the request once if it is awaited several times', async () => {
     const { fetcher, calls } = createFakeFetcher();
     const req = new XRequest(fetcher, 'get', 'https://example.com');
 
@@ -91,7 +91,7 @@ describe('XRequest', () => {
     assert.equal(calls.length, 1);
   });
 
-  it('timeout передаётся в fetcher', async () => {
+  it('should pass timeout to the fetcher if it is set', async () => {
     const { fetcher, calls } = createFakeFetcher();
 
     await new XRequest(fetcher, 'get', 'https://example.com').timeout(500);
@@ -100,7 +100,7 @@ describe('XRequest', () => {
   });
 
   describe('retries', () => {
-    it('без retries запрос выполняется один раз и ошибка пробрасывается', async () => {
+    it('should run once and rethrow the error if retries are not set', async () => {
       const { fetcher, calls } = createFlakyFetcher(1);
 
       await assert.rejects(async () => await new XRequest(fetcher, 'get', 'https://example.com'), /fail #1/);
@@ -108,7 +108,7 @@ describe('XRequest', () => {
       assert.equal(calls.length, 1);
     });
 
-    it('повторяет запрос и возвращает результат успешной попытки', async () => {
+    it('should retry and return the result of the successful attempt if an attempt fails', async () => {
       const { fetcher, calls } = createFlakyFetcher(2, { data: 42 });
 
       const result = await new XRequest(fetcher, 'get', 'https://example.com').retries(3, 1);
@@ -117,7 +117,7 @@ describe('XRequest', () => {
       assert.equal(calls.length, 3);
     });
 
-    it('не делает лишних попыток после успеха', async () => {
+    it('should not make extra attempts if an attempt succeeds', async () => {
       const { fetcher, calls } = createFlakyFetcher(0);
 
       await new XRequest(fetcher, 'get', 'https://example.com').retries(3, 1);
@@ -125,7 +125,7 @@ describe('XRequest', () => {
       assert.equal(calls.length, 1);
     });
 
-    it('после исчерпания попыток бросает последнюю ошибку', async () => {
+    it('should throw the last error if attempts are exhausted', async () => {
       const { fetcher, calls } = createFlakyFetcher(10);
 
       await assert.rejects(
@@ -136,7 +136,7 @@ describe('XRequest', () => {
       assert.equal(calls.length, 3);
     });
 
-    it('ждёт backoff между попытками', async () => {
+    it('should wait for backoff between attempts if backoff is set', async () => {
       const { fetcher } = createFlakyFetcher(2);
       const start = Date.now();
 
@@ -145,7 +145,7 @@ describe('XRequest', () => {
       assert.ok(Date.now() - start >= 80);
     });
 
-    it('несколько await не запускают ретраи заново', async () => {
+    it('should not restart retries if the request is awaited several times', async () => {
       const { fetcher, calls } = createFlakyFetcher(1);
       const req = new XRequest(fetcher, 'get', 'https://example.com').retries(2, 1);
 
@@ -156,7 +156,7 @@ describe('XRequest', () => {
     });
 
     for (const status of [400, 401, 403, 404, 422]) {
-      it(`не повторяет запрос при ${status}`, async () => {
+      it(`should not retry if the status is ${status}`, async () => {
         const { fetcher, calls } = createFlakyFetcher(10, undefined, () => new HttpError(status, ''));
 
         await assert.rejects(
@@ -169,7 +169,7 @@ describe('XRequest', () => {
     }
 
     for (const status of [429, 500, 503]) {
-      it(`повторяет запрос при ${status}`, async () => {
+      it(`should retry if the status is ${status}`, async () => {
         const { fetcher, calls } = createFlakyFetcher(1, { ok: true }, () => new HttpError(status, ''));
 
         const result = await new XRequest(fetcher, 'get', 'https://example.com').retries(2, 1);
@@ -179,7 +179,7 @@ describe('XRequest', () => {
       });
     }
 
-    it('не повторяет запрос при ошибке валидации (нет url)', async () => {
+    it('should not retry if validation fails because the url is missing', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await assert.rejects(
@@ -190,21 +190,21 @@ describe('XRequest', () => {
       assert.equal(calls.length, 0);
     });
 
-    it('retries больше maxRetries из конфига бросает ошибку', () => {
+    it('should throw if retries exceeds maxRetries from the config', () => {
       const { fetcher } = createFakeFetcher();
       const req = new XRequest(fetcher, 'get', 'https://example.com', { maxRetries: 2 });
 
       assert.throws(() => req.retries(3, 1), /maxRetries/);
     });
 
-    it('retries в пределах maxRetries допускается', () => {
+    it('should accept retries if it is within maxRetries', () => {
       const { fetcher } = createFakeFetcher();
       const req = new XRequest(fetcher, 'get', 'https://example.com', { maxRetries: 2 });
 
       assert.doesNotThrow(() => req.retries(2, 1));
     });
 
-    it('maxRetries: 0 в конфиге недопустим', () => {
+    it('should reject maxRetries: 0 if it is set in the config', () => {
       const { fetcher } = createFakeFetcher();
 
       assert.throws(
@@ -213,7 +213,7 @@ describe('XRequest', () => {
       );
     });
 
-    it('retries(0) недопустим', () => {
+    it('should reject retries(0) if it is called', () => {
       const { fetcher } = createFakeFetcher();
       const req = new XRequest(fetcher, 'get', 'https://example.com');
 
@@ -222,7 +222,7 @@ describe('XRequest', () => {
   });
 
   describe('fallback', () => {
-    it('возвращает значение фолбека при ошибке', async () => {
+    it('should return the fallback value if the request fails', async () => {
       const { fetcher } = createFlakyFetcher(10);
 
       const result = await new XRequest(fetcher, 'get', 'https://example.com').fallback({ cached: true });
@@ -230,7 +230,7 @@ describe('XRequest', () => {
       assert.deepEqual(result, { cached: true });
     });
 
-    it('falsy значения тоже работают как фолбек', async () => {
+    it('should use falsy values as fallback if they are passed', async () => {
       for (const value of [0, null, '', false]) {
         const { fetcher } = createFlakyFetcher(10);
 
@@ -240,7 +240,7 @@ describe('XRequest', () => {
       }
     });
 
-    it('функция вызывается лениво и получает ошибку', async () => {
+    it('should call the fallback function lazily with the error if the request fails', async () => {
       const { fetcher } = createFlakyFetcher(10);
       let calledWith: unknown;
       const req = new XRequest(fetcher, 'get', 'https://example.com').fallback((error) => {
@@ -254,7 +254,7 @@ describe('XRequest', () => {
       assert.match(String(calledWith), /fail #1/);
     });
 
-    it('не вызывается и не нужен при успешном ответе', async () => {
+    it('should not call the fallback if the request succeeds', async () => {
       const { fetcher } = createFlakyFetcher(0, { real: 1 });
       let called = false;
 
@@ -268,7 +268,7 @@ describe('XRequest', () => {
       assert.equal(called, false);
     });
 
-    it('срабатывает только после исчерпания ретраев', async () => {
+    it('should apply the fallback only if retries are exhausted', async () => {
       const { fetcher, calls } = createFlakyFetcher(10);
 
       const result = await new XRequest(fetcher, 'get', 'https://example.com')
@@ -279,7 +279,7 @@ describe('XRequest', () => {
       assert.equal(calls.length, 3);
     });
 
-    it('успешный ретрай возвращает реальный ответ, а не фолбек', async () => {
+    it('should return the real response instead of the fallback if a retry succeeds', async () => {
       const { fetcher } = createFlakyFetcher(1, 'real');
 
       const result = await new XRequest(fetcher, 'get', 'https://example.com')
@@ -289,13 +289,13 @@ describe('XRequest', () => {
       assert.equal(result, 'real');
     });
 
-    it('без фолбека ошибка по-прежнему пробрасывается', async () => {
+    it('should still rethrow the error if no fallback is set', async () => {
       const { fetcher } = createFlakyFetcher(10);
 
       await assert.rejects(async () => await new XRequest(fetcher, 'get', 'https://example.com'), /fail #1/);
     });
 
-    it('не скрывает ошибку валидации', async () => {
+    it('should not hide a validation error if a fallback is set', async () => {
       const { fetcher } = createFakeFetcher();
 
       await assert.rejects(
@@ -304,7 +304,7 @@ describe('XRequest', () => {
       );
     });
 
-    it('не вызывает onrejected, если фолбек обработал ошибку', async () => {
+    it('should not call onrejected if the fallback handled the error', async () => {
       const { fetcher } = createFlakyFetcher(10);
       let rejected = false;
 
@@ -317,7 +317,7 @@ describe('XRequest', () => {
       assert.equal(rejected, false);
     });
 
-    it('повторный await не вызывает фолбек и запрос заново', async () => {
+    it('should not call the fallback or the request again if the request is awaited again', async () => {
       const { fetcher, calls } = createFlakyFetcher(10);
       const req = new XRequest(fetcher, 'get', 'https://example.com').fallback('x');
 
@@ -328,8 +328,8 @@ describe('XRequest', () => {
     });
   });
 
-  describe('url и конфиг', () => {
-    it('baseUrl не применяется к абсолютному url', async () => {
+  describe('url and config', () => {
+    it('should not apply baseUrl if the url is absolute', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await new XRequest(fetcher, 'get', 'https://other.com/x', { baseUrl: 'https://api.com' });
@@ -337,7 +337,7 @@ describe('XRequest', () => {
       assert.equal(calls[0]?.url, 'https://other.com/x');
     });
 
-    it('baseUrl склеивается без двойных слэшей', async () => {
+    it('should join baseUrl without double slashes if slashes are at the boundary', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await new XRequest(fetcher, 'get', '//users', { baseUrl: 'https://api.com///' });
@@ -345,7 +345,7 @@ describe('XRequest', () => {
       assert.equal(calls[0]?.url, 'https://api.com/users');
     });
 
-    it('timeout(null) не передаёт timeout в fetcher', async () => {
+    it('should not pass timeout to the fetcher if timeout(null) is called', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await new XRequest(fetcher, 'get', 'https://example.com').timeout(null);
@@ -353,7 +353,7 @@ describe('XRequest', () => {
       assert.equal('timeout' in (calls[0] ?? {}), false);
     });
 
-    it('пустой метод или url дают ошибку валидации', async () => {
+    it('should throw a validation error if the method or url is empty', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await assert.rejects(
@@ -363,15 +363,15 @@ describe('XRequest', () => {
       assert.equal(calls.length, 0);
     });
 
-    it('retries(n) без backoff использует 500 мс по умолчанию и не падает', () => {
+    it('should use 500 ms as default backoff if retries(n) is called without backoff', () => {
       const { fetcher } = createFakeFetcher();
 
       assert.doesNotThrow(() => new XRequest(fetcher, 'get', 'https://example.com').retries(2));
     });
   });
 
-  describe('path-параметры', () => {
-    it('подставляет параметры в url', async () => {
+  describe('path params', () => {
+    it('should substitute params into the url if the url has placeholders', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await new XRequest(fetcher, 'get', 'https://api.com/companies/{companyId}/users/{userId}')
@@ -380,7 +380,7 @@ describe('XRequest', () => {
       assert.equal(calls[0]?.url, 'https://api.com/companies/1/users/abc');
     });
 
-    it('экранирует значения', async () => {
+    it('should escape values if they contain special characters', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await new XRequest(fetcher, 'get', 'https://api.com/files/{name}').path({ name: 'a/b c?' });
@@ -388,7 +388,7 @@ describe('XRequest', () => {
       assert.equal(calls[0]?.url, 'https://api.com/files/a%2Fb%20c%3F');
     });
 
-    it('работает вместе с baseUrl', async () => {
+    it('should work with baseUrl if both are set', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await new XRequest(fetcher, 'get', '/users/{id}', { baseUrl: 'https://api.com' }).path({ id: 7 });
@@ -396,7 +396,7 @@ describe('XRequest', () => {
       assert.equal(calls[0]?.url, 'https://api.com/users/7');
     });
 
-    it('один параметр может встречаться несколько раз', async () => {
+    it('should substitute every occurrence if a param appears several times', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await new XRequest(fetcher, 'get', 'https://api.com/{id}/copy/{id}').path({ id: 5 });
@@ -404,7 +404,7 @@ describe('XRequest', () => {
       assert.equal(calls[0]?.url, 'https://api.com/5/copy/5');
     });
 
-    it('кидает ошибку, если параметр не передан, и не шлёт запрос', async () => {
+    it('should throw and not send the request if a param is missing', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await assert.rejects(
@@ -414,7 +414,7 @@ describe('XRequest', () => {
       assert.equal(calls.length, 0);
     });
 
-    it('фолбек не скрывает отсутствующий path-параметр', async () => {
+    it('should not hide a missing path param if a fallback is set', async () => {
       const { fetcher } = createFakeFetcher();
 
       await assert.rejects(
@@ -423,7 +423,7 @@ describe('XRequest', () => {
       );
     });
 
-    it('url без плейсхолдеров не меняется', async () => {
+    it('should leave the url unchanged if it has no placeholders', async () => {
       const { fetcher, calls } = createFakeFetcher();
 
       await new XRequest(fetcher, 'get', 'https://api.com/users').path({ id: 1 });

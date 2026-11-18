@@ -4,7 +4,6 @@ import type { AddressInfo } from 'node:net';
 export type Context = {
   req: IncomingMessage;
   res: ServerResponse;
-  /** 1-based number of the request to this pathname */
   hit: number;
   url: URL;
   body: string;

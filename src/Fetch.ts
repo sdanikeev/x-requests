@@ -108,7 +108,6 @@ class Fetch implements Fetcher {
     }
   }
 
-  /** JSON error bodies are parsed so they can be typed; anything else stays raw text. */
   private parseErrorBody(raw: string, isJson: boolean): unknown {
     if (!isJson || !raw.trim()) return raw;
 

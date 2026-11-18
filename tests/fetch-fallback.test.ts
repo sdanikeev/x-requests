@@ -53,8 +53,8 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-describe('Fetch без глобального fetch (node-fetch)', () => {
-  it('GET с query-параметрами', async () => {
+describe('Fetch without global fetch (node-fetch)', () => {
+  it('should send query params if a GET request has params', async () => {
     globalThis.fetch = undefined as never;
 
     const result = await new Fetch().request<{ method: string; url: string; contentType: string | null }>({
@@ -68,7 +68,7 @@ describe('Fetch без глобального fetch (node-fetch)', () => {
     assert.equal(result.contentType, null);
   });
 
-  it('POST отправляет json body и Content-Type', async () => {
+  it('should send a json body and Content-Type if the request is a POST', async () => {
     globalThis.fetch = undefined as never;
 
     const result = await new Fetch().request<{ body: string; contentType: string }>({
@@ -81,7 +81,7 @@ describe('Fetch без глобального fetch (node-fetch)', () => {
     assert.deepEqual(JSON.parse(result.body), { a: 1 });
   });
 
-  it('HttpError с распарсенным телом', async () => {
+  it('should throw HttpError with a parsed body if the response is not ok', async () => {
     globalThis.fetch = undefined as never;
 
     await assert.rejects(
@@ -92,13 +92,13 @@ describe('Fetch без глобального fetch (node-fetch)', () => {
     );
   });
 
-  it('204 -> undefined', async () => {
+  it('should return undefined if the response is 204', async () => {
     globalThis.fetch = undefined as never;
 
     assert.equal(await new Fetch().request({ method: 'post', url: `${base}/empty` }), undefined);
   });
 
-  it('недоступный сервер -> NetworkError', async () => {
+  it('should throw NetworkError if the server is unreachable', async () => {
     globalThis.fetch = undefined as never;
     const dead = createServer();
 

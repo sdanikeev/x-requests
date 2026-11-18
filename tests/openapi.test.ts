@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { components, paths } from '../examples/generated_v1.js';
-import type { FromOpenApi } from '../src/codegen/types.js';
+import type { FromOpenApi } from '../src/openapi.js';
 import { HttpError, isHttpError } from '../src/errors.js';
 import XClient from '../src/XClient.js';
 import { createFakeFetcher, createFlakyFetcher } from './helpers.js';
@@ -20,28 +20,28 @@ type ValidationError = components['schemas']['ValidationError'];
 type Routes = FromOpenApi<paths>;
 
 describe('FromOpenApi', () => {
-  it('сохраняет все пути', () => {
+  it('should keep all paths if the schema is converted', () => {
     assertType<Equal<keyof Routes, '/ping' | '/users' | '/users/{id}' | '/companies/{companyId}/users/{userId}'>>();
   });
 
-  it('отбрасывает методы, которых нет (put?: never) и служебный ключ parameters', () => {
+  it('should drop missing methods (put?: never) and the parameters key if the schema is converted', () => {
     assertType<Equal<keyof Routes['/ping'], 'get'>>();
     assertType<Equal<keyof Routes['/users'], 'get' | 'post'>>();
     assertType<Equal<keyof Routes['/users/{id}'], 'get' | 'patch' | 'delete'>>();
   });
 
-  it('text/plain ответ: берётся единственный content type', () => {
+  it('should take the only content type if the response is text/plain', () => {
     assertType<Equal<Routes['/ping']['get'], { response: 'pong' }>>();
   });
 
-  it('query и массив в ответе', () => {
+  it('should type query and an array response if they are declared', () => {
     assertType<Equal<Routes['/users']['get'], {
       query?: { page?: number; limit?: number; role?: components['schemas']['Role'] };
       response: User[];
     }>>();
   });
 
-  it('POST: body, ответ 201 и типизированные ошибки', () => {
+  it('should type body, the 201 response and errors if a POST operation is declared', () => {
     assertType<Equal<Routes['/users']['post'], {
       body: CreateUser;
       response: User;
@@ -49,7 +49,7 @@ describe('FromOpenApi', () => {
     }>>();
   });
 
-  it('параметры path-уровня попадают в операцию, query остаётся необязательным', () => {
+  it('should merge path-level params into the operation and keep query optional if they are declared', () => {
     assertType<Equal<Routes['/users/{id}']['get'], {
       query?: { expand?: 'company' | 'orders' };
       path: { id: number };
@@ -58,7 +58,7 @@ describe('FromOpenApi', () => {
     }>>();
   });
 
-  it('PATCH: body из requestBody', () => {
+  it('should take body from requestBody if a PATCH operation is declared', () => {
     assertType<Equal<Routes['/users/{id}']['patch'], {
       body: UpdateUser;
       path: { id: number };
@@ -67,7 +67,7 @@ describe('FromOpenApi', () => {
     }>>();
   });
 
-  it('DELETE: 204 без content -> response: undefined', () => {
+  it('should set response to undefined if a DELETE returns 204 without content', () => {
     assertType<Equal<Routes['/users/{id}']['delete'], {
       path: { id: number };
       response: undefined;
@@ -75,7 +75,7 @@ describe('FromOpenApi', () => {
     }>>();
   });
 
-  it('header-параметры -> headers, path-параметры типизированы, default -> errors.default', () => {
+  it('should map header params to headers, type path params and map default to errors.default if they are declared', () => {
     assertType<Equal<Routes['/companies/{companyId}/users/{userId}']['get'], {
       headers?: { 'X-Request-Id'?: string };
       path: { companyId: number; userId: number };
@@ -84,7 +84,7 @@ describe('FromOpenApi', () => {
     }>>();
   });
 
-  it('обязательность сохраняется: required query и необязательный requestBody', () => {
+  it('should keep required query and optional requestBody if optionality is declared', () => {
     type Custom = {
       '/search': {
         get: {
@@ -107,10 +107,10 @@ describe('FromOpenApi', () => {
   });
 });
 
-describe('FromOpenApi + клиент', () => {
+describe('FromOpenApi + client', () => {
   const user: User = { id: 1, email: 'a@b.c', role: 'admin' };
 
-  it('xclient выводит типы из сгенерированной схемы', async () => {
+  it('should infer types from the generated schema if xclient is created with it', async () => {
     const { fetcher, calls } = createFakeFetcher(user);
     const client = new XClient<Routes>(fetcher);
 
@@ -126,19 +126,19 @@ describe('FromOpenApi + клиент', () => {
     assertType<Equal<typeof removed, undefined>>();
   });
 
-  it('типы path-параметров берутся из схемы', () => {
+  it('should take path param types from the schema if they are declared', () => {
     const { fetcher } = createFakeFetcher();
     const client = new XClient<Routes>(fetcher);
 
-    // допустимо: id — number
+    // valid: id is a number
     void (() => client.get('/users/{id}', { id: 1 }));
-    // @ts-expect-error — в схеме id: integer, строка недопустима
+    // @ts-expect-error — the schema declares id: integer, a string is invalid
     void (() => client.get('/users/{id}', { id: 'abc' }));
-    // @ts-expect-error — лишний параметр
+    // @ts-expect-error — extra param
     void (() => client.get('/users/{id}', { id: 1, extra: 1 }));
   });
 
-  it('errors.default типизирует тело для остальных статусов', async () => {
+  it('should type the body of other statuses if errors.default is declared', async () => {
     const { fetcher } = createFlakyFetcher(10, undefined, () => new HttpError(503, '', { message: 'down' }));
     const client = new XClient<Routes>(fetcher);
 
@@ -161,7 +161,7 @@ describe('FromOpenApi + клиент', () => {
     assert.equal(result.error.data.message, 'down');
   });
 
-  it('ошибки типизируются из responses', async () => {
+  it('should type errors from responses if they are declared', async () => {
     const { fetcher } = createFlakyFetcher(10, undefined, () => new HttpError(404, '', { message: 'nf' }));
     const client = new XClient<Routes>(fetcher);
 
@@ -172,17 +172,17 @@ describe('FromOpenApi + клиент', () => {
     assert.equal(result.error.data.message, 'nf');
   });
 
-  it('проверки типов работают на сгенерированных роутах', () => {
+  it('should reject invalid usage if routes are generated', () => {
     const { fetcher } = createFakeFetcher();
     const client = new XClient<Routes>(fetcher);
 
-    // @ts-expect-error — у /ping нет post
+    // @ts-expect-error — /ping has no post
     void (() => client.post('/ping'));
-    // @ts-expect-error — email обязателен
+    // @ts-expect-error — email is required
     void (() => client.post('/users').body({ name: 'x' }));
-    // @ts-expect-error — неверное значение enum в query
+    // @ts-expect-error — invalid enum value in query
     void (() => client.get('/users').params({ role: 'root' }));
-    // @ts-expect-error — path-параметр обязателен
+    // @ts-expect-error — path param is required
     void (() => client.get('/users/{id}'));
   });
 });

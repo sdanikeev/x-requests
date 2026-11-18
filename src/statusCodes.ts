@@ -32,10 +32,8 @@ export const isClientError = (status: number): boolean => status >= 400 && statu
 
 export const isServerError = (status: number): boolean => status >= 500 && status < 600;
 
-/** Responses that never have a body. */
 export const isEmptyResponse = (status: number): boolean =>
   status === HttpStatus.NO_CONTENT || status === HttpStatus.RESET_CONTENT;
 
-/** Statuses worth repeating: the server is overloaded or broken, not the request. */
 export const isRetryableStatus = (status: number): boolean =>
   status === HttpStatus.TOO_MANY_REQUESTS || isServerError(status);

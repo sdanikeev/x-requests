@@ -1,0 +1,31 @@
+{
+  "name": "@x-requests/codegen",
+  "version": "1.0.0",
+  "author": {
+    "name": "Saveliy Anikeev"
+  },
+  "type": "module",
+  "bin": {
+    "x-requests": "./dist/cli.js"
+  },
+  "main": "./dist/Generator.js",
+  "types": "./dist/Generator.d.ts",
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "test": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test \".test-build/tests/*.test.js\""
+  },
+  "peerDependencies": {
+    "openapi-typescript": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "openapi-typescript": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist"
+  ]
+}

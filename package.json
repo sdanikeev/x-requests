@@ -1,29 +1,38 @@
 {
-  "name": "x-requests",
+  "name": "@x-requests/core",
   "version": "1.0.0",
   "author": {
     "name": "Saveliy Anikeev"
   },
   "main": "./dist/index.js",
   "scripts": {
-    "test": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test \".test-build/tests/*.test.js\"",
+    "test": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test \".test-build/tests/*.test.js\" && npm test -w packages/codegen",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && npm run build -w packages/codegen",
     "prepublishOnly": "npm run lint && npm test && npm run test:e2e && npm run build",
     "coverage": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test --experimental-test-coverage --test-coverage-exclude=\".test-build/tests/**\" --test-coverage-lines=95 --test-coverage-branches=90 --test-coverage-functions=95 \".test-build/tests/*.test.js\"",
     "test:e2e": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test \".test-build/tests/e2e/*.test.js\""
   },
   "keywords": [],
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^6.0.1",
     "@types/node": "^26.6.6",
     "eslint": "^10.15.0",
     "globals": "^17.14.0",
+    "openapi-typescript": "^7.13.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.73.0"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
   },
   "dependencies": {
     "fast-stringify": "^4.0.3",

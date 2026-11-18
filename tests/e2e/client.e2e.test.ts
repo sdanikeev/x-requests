@@ -34,7 +34,7 @@ interface Routes {
   '/rate-limited': { get: { response: { attempt: number } } };
 }
 
-describe('e2e: клиент против настоящего HTTP-сервера', () => {
+describe('e2e: client against a real HTTP server', () => {
   let server: Awaited<ReturnType<typeof startServer>>;
   let client: ReturnType<typeof xclient<Routes>>;
 
@@ -99,37 +99,37 @@ describe('e2e: клиент против настоящего HTTP-сервер�
     await server.close();
   });
 
-  describe('базовые сценарии', () => {
-    it('GET: path-параметр, query и типизированный ответ', async () => {
+  describe('basics', () => {
+    it('should send path param and query and return a typed response if a GET request is made', async () => {
       const item = await client.get('/items/{id}', { id: 1 }).params({ verbose: true });
 
       assert.deepEqual(item, { id: 1, name: 'verbose-item' });
     });
 
-    it('POST: json body доходит до сервера, ответ 201 разбирается', async () => {
+    it('should deliver the json body and parse the 201 response if a POST request is made', async () => {
       const created = await client.post('/items').body({ name: 'new' });
 
       assert.deepEqual(created, { id: 2, name: 'new' });
     });
 
-    it('path-параметры экранируются на проводе', async () => {
+    it('should escape path params on the wire if they contain special characters', async () => {
       const result = await client.get('/files/{name}', { name: 'a/b c?' });
 
       assert.equal(result.pathname, '/files/a%2Fb%20c%3F');
     });
 
-    it('text/plain возвращается строкой, 204 -> undefined', async () => {
+    it('should return a string for text/plain and undefined for 204 if the server responds so', async () => {
       assert.equal(await client.get('/text'), 'hello');
       assert.equal(await client.delete('/empty'), undefined);
     });
 
-    it('заголовки: пользовательские доходят, Content-Type только при body', async () => {
+    it('should deliver custom headers and send Content-Type only if the request has a body', async () => {
       const withoutBody = await client.get('/headers').headers({ 'X-Custom': 'yes', 'Authorization': 'Bearer t' });
 
       assert.deepEqual(withoutBody, { contentType: null, custom: 'yes', authorization: 'Bearer t' });
     });
 
-    it('большой body (1 МБ) доезжает целиком', async () => {
+    it('should deliver the whole body if it is large (1 MB)', async () => {
       const big = 'x'.repeat(1_000_000);
 
       const result = await client.post('/echo').body({ big });
@@ -138,8 +138,8 @@ describe('e2e: клиент против настоящего HTTP-сервер�
     });
   });
 
-  describe('ошибки', () => {
-    it('404: HttpError с типизированным телом', async () => {
+  describe('errors', () => {
+    it('should throw HttpError with a typed body if the server responds with 404', async () => {
       const result = await client.get('/items/{id}', { id: 404 }).result();
 
       assert.ok(!result.ok);
@@ -147,7 +147,7 @@ describe('e2e: клиент против настоящего HTTP-сервер�
       assert.equal(result.error.data.message, 'item not found');
     });
 
-    it('404 не повторяется', async () => {
+    it('should not retry if the server responds with 404', async () => {
       const hitsBefore = server.hitsOf('/items/404');
 
       await client.get('/items/{id}', { id: 404 }).retries(3, 1).result();
@@ -155,7 +155,7 @@ describe('e2e: клиент против настоящего HTTP-сервер�
       assert.equal(server.hitsOf('/items/404') - hitsBefore, 1);
     });
 
-    it('невалидный JSON -> ParseError и без повторов', async () => {
+    it('should throw ParseError without retrying if the server returns invalid JSON', async () => {
       const result = await client.get('/bad-json').retries(3, 1).result();
 
       assert.ok(!result.ok);
@@ -163,7 +163,7 @@ describe('e2e: клиент против настоящего HTTP-сервер�
       assert.equal(server.hitsOf('/bad-json'), 1);
     });
 
-    it('обрыв соединения -> NetworkError, повторяется', async () => {
+    it('should throw NetworkError and retry if the connection is dropped', async () => {
       const result = await client.get('/reset').retries(2, 1).result();
 
       assert.ok(!result.ok);
@@ -171,7 +171,7 @@ describe('e2e: клиент против настоящего HTTP-сервер�
       assert.equal(server.hitsOf('/reset'), 3);
     });
 
-    it('сервер, которого нет, -> NetworkError', async () => {
+    it('should throw NetworkError if the server does not exist', async () => {
       const dead = xclient({ config: { baseUrl: 'http://127.0.0.1:1' } });
 
       const result = await dead.get('/x').result();
@@ -181,20 +181,20 @@ describe('e2e: клиент против настоящего HTTP-сервер�
     });
   });
 
-  describe('ретраи', () => {
-    it('503, 503, 200 -> успех с третьей попытки', async () => {
+  describe('retries', () => {
+    it('should succeed on the third attempt if the server responds 503, 503, 200', async () => {
       const result = await client.get('/flaky/{id}', { id: 1 }).retries(3, 1);
 
       assert.deepEqual(result, { ok: true, attempt: 3 });
     });
 
-    it('429 повторяется', async () => {
+    it('should retry if the server responds with 429', async () => {
       const result = await client.get('/rate-limited').retries(2, 1);
 
       assert.deepEqual(result, { attempt: 2 });
     });
 
-    it('исчерпание ретраев: retries + 1 запросов и последняя ошибка', async () => {
+    it('should make retries + 1 requests and throw the last error if retries are exhausted', async () => {
       const result = await client.get('/always-503').retries(2, 1).result();
 
       assert.ok(!result.ok);
@@ -203,34 +203,34 @@ describe('e2e: клиент против настоящего HTTP-сервер�
       assert.equal(server.hitsOf('/always-503'), 3);
     });
 
-    it('между попытками выдерживается экспоненциальный backoff', async () => {
+    it('should wait with exponential backoff between attempts if backoff is set', async () => {
       const started = Date.now();
 
       await client.get('/always-503').retries(3, 20).result();
 
-      // паузы: 20 + 40 + 80 = 140 мс
-      assert.ok(Date.now() - started >= 135, `слишком быстро: ${Date.now() - started} мс`);
+      // pauses: 20 + 40 + 80 = 140 ms
+      assert.ok(Date.now() - started >= 135, `too fast: ${Date.now() - started} ms`);
     });
   });
 
-  describe('таймауты', () => {
-    it('медленный сервер -> TimeoutError', async () => {
+  describe('timeouts', () => {
+    it('should throw TimeoutError if the server is slow', async () => {
       const started = Date.now();
 
       const result = await client.get('/slow').timeout(50).result();
 
       assert.ok(!result.ok);
       assert.equal(result.error.kind, 'timeout');
-      assert.ok(Date.now() - started < 250, 'таймаут не должен ждать ответа сервера');
+      assert.ok(Date.now() - started < 250, 'timeout must not wait for the server response');
     });
 
-    it('таймаут действует на каждую попытку, быстрая попытка выигрывает', async () => {
+    it('should apply the timeout to every attempt and let a fast attempt win if retries are set', async () => {
       const result = await client.get('/slow-then-fast').timeout(50).retries(2, 1);
 
       assert.deepEqual(result, { attempt: 2 });
     });
 
-    it('таймаут + ретраи: все попытки доходят до сервера', async () => {
+    it('should send every attempt to the server if timeout and retries are combined', async () => {
       const hitsBefore = server.hitsOf('/slow');
 
       await client.get('/slow').timeout(30).retries(2, 1).result();
@@ -239,8 +239,8 @@ describe('e2e: клиент против настоящего HTTP-сервер�
     });
   });
 
-  describe('фолбеки', () => {
-    it('значение подставляется после исчерпания ретраев', async () => {
+  describe('fallbacks', () => {
+    it('should use the fallback value if retries are exhausted', async () => {
       const hitsBefore = server.hitsOf('/always-503');
 
       const result = await client.get('/always-503').retries(1, 1).fallback({ cached: true });
@@ -249,7 +249,7 @@ describe('e2e: клиент против настоящего HTTP-сервер�
       assert.equal(server.hitsOf('/always-503') - hitsBefore, 2);
     });
 
-    it('функция получает реальную HttpError', async () => {
+    it('should pass the real HttpError to the fallback function if the request fails', async () => {
       const result = await client.get('/always-503').fallback(error => (
         error instanceof HttpError ? error.status : 0
       ));
@@ -257,15 +257,15 @@ describe('e2e: клиент против настоящего HTTP-сервер�
       assert.equal(result, 503);
     });
 
-    it('фолбек не нужен, когда запрос успешен', async () => {
+    it('should not use the fallback if the request succeeds', async () => {
       const item = await client.get('/items/{id}', { id: 1 }).fallback(null);
 
       assert.equal(item?.id, 1);
     });
   });
 
-  describe('параллельность', () => {
-    it('Promise.all независимых запросов', async () => {
+  describe('concurrency', () => {
+    it('should resolve independent requests if they are run with Promise.all', async () => {
       const [a, b, list] = await Promise.all([
         client.get('/items/{id}', { id: 1 }),
         client.post('/items').body({ name: 'p' }),
@@ -277,7 +277,7 @@ describe('e2e: клиент против настоящего HTTP-сервер�
       assert.equal(list.length, 2);
     });
 
-    it('один и тот же запрос в Promise.all уходит на сервер один раз', async () => {
+    it('should hit the server once if the same request is passed to Promise.all twice', async () => {
       const hitsBefore = server.hitsOf('/items');
       const request = client.get('/items');
 
@@ -287,7 +287,7 @@ describe('e2e: клиент против настоящего HTTP-сервер�
       assert.equal(server.hitsOf('/items') - hitsBefore, 1);
     });
 
-    it('200 параллельных запросов не перемешивают ответы', async () => {
+    it('should not mix up responses if 200 requests run in parallel', async () => {
       const ids = Array.from({ length: 200 }, (_, i) => i);
 
       const results = await Promise.all(ids.map(async (i) => {
@@ -299,7 +299,7 @@ describe('e2e: клиент против настоящего HTTP-сервер�
       assert.deepEqual(results, ids);
     });
 
-    it('ретраи одного запроса не мешают параллельным', async () => {
+    it('should not affect parallel requests if one request retries', async () => {
       const [flaky, plain] = await Promise.all([
         client.get('/rate-limited').retries(2, 30),
         client.get('/items/{id}', { id: 1 }),

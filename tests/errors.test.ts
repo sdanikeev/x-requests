@@ -26,8 +26,8 @@ const respond = (body: string, status: number, contentType = 'application/json')
     new Response(body, { status, headers: { 'Content-Type': contentType } })) as typeof fetch;
 };
 
-describe('классы ошибок', () => {
-  it('все наследуются от XRequestError и Error, имя = имя класса', () => {
+describe('error classes', () => {
+  it('should extend XRequestError and Error and use the class name as name if an error is created', () => {
     const errors = [
       new HttpError(500, ''),
       new NetworkError('x'),
@@ -42,7 +42,7 @@ describe('классы ошибок', () => {
     }
   });
 
-  it('kind различает ошибки', () => {
+  it('should distinguish errors by kind if they are of different classes', () => {
     assert.equal(new HttpError(500, '').kind, 'http');
     assert.equal(new NetworkError('x').kind, 'network');
     assert.equal(new TimeoutError(1).kind, 'timeout');
@@ -50,11 +50,11 @@ describe('классы ошибок', () => {
     assert.equal(new ValidationError('x').kind, 'validation');
   });
 
-  it('ValidationError не входит в XRequestError', () => {
+  it('should not make ValidationError an XRequestError if it is created', () => {
     assert.equal(new ValidationError('x') instanceof XRequestError, false);
   });
 
-  it('toRequestError оборачивает чужие ошибки в NetworkError с cause', () => {
+  it('toRequestError should wrap foreign errors in NetworkError with cause if the error is not an XRequestError', () => {
     const original = new Error('boom');
     const wrapped = toRequestError(original);
 
@@ -67,7 +67,7 @@ describe('классы ошибок', () => {
 });
 
 describe('isHttpError', () => {
-  it('true только для HttpError (с проверкой статуса)', () => {
+  it('should return true only for HttpError if the value is checked, optionally by status', () => {
     const error = new HttpError(404, '');
 
     assert.equal(isHttpError(error), true);
@@ -79,8 +79,8 @@ describe('isHttpError', () => {
   });
 });
 
-describe('ошибки из Fetch', () => {
-  it('HttpError: data — распарсенный json, body — сырой текст', async () => {
+describe('errors from Fetch', () => {
+  it('should set data to parsed json and body to raw text if the HttpError body is json', async () => {
     respond('{"message":"nope"}', 404);
 
     await assert.rejects(
@@ -92,7 +92,7 @@ describe('ошибки из Fetch', () => {
     );
   });
 
-  it('HttpError: не-json тело остаётся строкой в data', async () => {
+  it('should keep a non-json body as a string in data if the HttpError body is not json', async () => {
     respond('Bad gateway', 502, 'text/plain');
 
     await assert.rejects(
@@ -101,7 +101,7 @@ describe('ошибки из Fetch', () => {
     );
   });
 
-  it('HttpError: битый json в теле ошибки не маскирует HTTP-статус', async () => {
+  it('should keep the HTTP status if the error body contains broken json', async () => {
     respond('{oops', 500);
 
     await assert.rejects(
@@ -110,7 +110,7 @@ describe('ошибки из Fetch', () => {
     );
   });
 
-  it('сетевой сбой -> NetworkError с cause', async () => {
+  it('should throw NetworkError with cause if a network failure happens', async () => {
     const cause = new TypeError('fetch failed');
     globalThis.fetch = (async () => {
       throw cause;
@@ -122,7 +122,7 @@ describe('ошибки из Fetch', () => {
     );
   });
 
-  it('таймаут -> TimeoutError с timeoutMs', async () => {
+  it('should throw TimeoutError with timeoutMs if the request times out', async () => {
     globalThis.fetch = ((_url: string, init: RequestInit) =>
       new Promise((_resolve, reject) => {
         init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
@@ -134,7 +134,7 @@ describe('ошибки из Fetch', () => {
     );
   });
 
-  it('невалидный json в успешном ответе -> ParseError', async () => {
+  it('should throw ParseError if a successful response contains invalid json', async () => {
     respond('{oops', 200);
 
     await assert.rejects(
@@ -145,7 +145,7 @@ describe('ошибки из Fetch', () => {
 });
 
 describe('XRequest.result()', () => {
-  it('успех -> { ok: true, data }', async () => {
+  it('should return { ok: true, data } if the request succeeds', async () => {
     const { fetcher } = createFakeFetcher({ id: 1 });
 
     const result = await new XRequest(fetcher, 'get', 'https://example.com').result();
@@ -153,7 +153,7 @@ describe('XRequest.result()', () => {
     assert.deepEqual(result, { ok: true, data: { id: 1 } });
   });
 
-  it('ошибка -> { ok: false, error }, промис не отклоняется', async () => {
+  it('should return { ok: false, error } without rejecting if the request fails', async () => {
     const { fetcher } = createFlakyFetcher(10, undefined, () => new HttpError(404, 'nf'));
 
     const result = await new XRequest(fetcher, 'get', 'https://example.com').result();
@@ -162,7 +162,7 @@ describe('XRequest.result()', () => {
     assert.ok(!result.ok && result.error instanceof HttpError && result.error.status === 404);
   });
 
-  it('чужая ошибка из кастомного fetcher становится NetworkError', async () => {
+  it('should turn a foreign error into NetworkError if a custom fetcher throws it', async () => {
     const { fetcher } = createFlakyFetcher(10);
 
     const result = await new XRequest(fetcher, 'get', 'https://example.com').result();
@@ -170,7 +170,7 @@ describe('XRequest.result()', () => {
     assert.ok(!result.ok && result.error instanceof NetworkError);
   });
 
-  it('после исчерпания ретраев возвращает последнюю ошибку', async () => {
+  it('should return the last error if retries are exhausted', async () => {
     const { fetcher, calls } = createFlakyFetcher(10, undefined, n => new HttpError(503, `try ${n}`));
 
     const result = await new XRequest(fetcher, 'get', 'https://example.com').retries(2, 1).result();
@@ -179,7 +179,7 @@ describe('XRequest.result()', () => {
     assert.ok(!result.ok && result.error instanceof HttpError && result.error.body === 'try 3');
   });
 
-  it('с fallback всегда ok', async () => {
+  it('should always return ok if a fallback is set', async () => {
     const { fetcher } = createFlakyFetcher(10);
 
     const result = await new XRequest(fetcher, 'get', 'https://example.com').fallback('x').result();
@@ -187,7 +187,7 @@ describe('XRequest.result()', () => {
     assert.deepEqual(result, { ok: true, data: 'x' });
   });
 
-  it('ValidationError по-прежнему бросается, а не возвращается', async () => {
+  it('should throw ValidationError instead of returning it if the request is invalid', async () => {
     const { fetcher } = createFakeFetcher();
 
     await assert.rejects(
@@ -197,8 +197,8 @@ describe('XRequest.result()', () => {
   });
 });
 
-describe('ретраи и типы ошибок', () => {
-  it('TimeoutError и NetworkError повторяются', async () => {
+describe('retries and error types', () => {
+  it('should retry if the error is TimeoutError or NetworkError', async () => {
     for (const make of [() => new TimeoutError(1), () => new NetworkError('x')]) {
       const { fetcher, calls } = createFlakyFetcher(1, 'ok', make);
 
@@ -209,7 +209,7 @@ describe('ретраи и типы ошибок', () => {
     }
   });
 
-  it('ParseError не повторяется', async () => {
+  it('should not retry if the error is ParseError', async () => {
     const { fetcher, calls } = createFlakyFetcher(10, undefined, () => new ParseError('{'));
 
     await assert.rejects(

@@ -4,7 +4,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['node_modules', '.test-build', 'dist', 'examples'] },
+  { ignores: ['node_modules', '**/.test-build', '**/dist', 'examples'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   stylistic.configs.customize({

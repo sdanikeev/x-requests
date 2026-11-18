@@ -30,7 +30,7 @@ describe('Fetch', () => {
     globalThis.fetch = realFetch;
   });
 
-  it('возвращает распарсенный json', async () => {
+  it('should return parsed json if the response is json', async () => {
     mockFetch(jsonResponse({ id: 1 }));
 
     const result = await new Fetch().request({ method: 'get', url: 'https://example.com' });
@@ -38,7 +38,7 @@ describe('Fetch', () => {
     assert.deepEqual(result, { id: 1 });
   });
 
-  it('кидает ошибку со статусом при !ok', async () => {
+  it('should throw an error with the status if the response is not ok', async () => {
     mockFetch(jsonResponse({ error: 'nope' }, 404));
 
     await assert.rejects(
@@ -47,7 +47,7 @@ describe('Fetch', () => {
     );
   });
 
-  it('ошибка !ok — HttpError с полем status и body', async () => {
+  it('should throw HttpError with status and body if the response is not ok', async () => {
     mockFetch(jsonResponse({ error: 'nope' }, 404));
 
     await assert.rejects(
@@ -56,7 +56,7 @@ describe('Fetch', () => {
     );
   });
 
-  it('добавляет params в query-string', async () => {
+  it('should add params to the query string if params are given', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({
@@ -68,7 +68,7 @@ describe('Fetch', () => {
     assert.equal(calls[0]?.url, 'https://example.com/users?page=2&q=a+b');
   });
 
-  it('сохраняет query, уже записанный в url', async () => {
+  it('should keep the query already present in the url if params are given', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({
@@ -82,7 +82,7 @@ describe('Fetch', () => {
     assert.equal(url.searchParams.get('page'), '1');
   });
 
-  it('сериализует body в json', async () => {
+  it('should serialize the body to json if a body is given', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({
@@ -94,7 +94,7 @@ describe('Fetch', () => {
     assert.equal(calls[0]?.init.body, '{"a":1}');
   });
 
-  it('строковый body не оборачивается в кавычки повторно', async () => {
+  it('should not quote a string body again if the body is a string', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({ method: 'post', url: 'https://example.com', body: 'raw' });
@@ -102,7 +102,7 @@ describe('Fetch', () => {
     assert.equal(calls[0]?.init.body, 'raw');
   });
 
-  it('ставит Content-Type: application/json по умолчанию', async () => {
+  it('should set Content-Type to application/json if none is passed', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({ method: 'post', url: 'https://example.com', body: {} });
@@ -111,7 +111,7 @@ describe('Fetch', () => {
     assert.equal(headers.get('content-type'), 'application/json');
   });
 
-  it('не перезаписывает переданный Content-Type', async () => {
+  it('should not override Content-Type if it is passed explicitly', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({
@@ -124,7 +124,7 @@ describe('Fetch', () => {
     assert.equal(headers.get('content-type'), 'text/plain');
   });
 
-  it('передаёт пользовательские заголовки', async () => {
+  it('should send custom headers if they are passed', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({
@@ -137,7 +137,7 @@ describe('Fetch', () => {
     assert.equal(headers.get('authorization'), 'Bearer x');
   });
 
-  it('метод уходит в верхнем регистре (lowercase patch не нормализуется fetch)', async () => {
+  it('should send the method in upper case if it is given in lower case', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({ method: 'patch', url: 'https://example.com' });
@@ -145,7 +145,7 @@ describe('Fetch', () => {
     assert.equal(calls[0]?.init.method, 'PATCH');
   });
 
-  it('не падает на ответе 204 без тела', async () => {
+  it('should not fail if the response is 204 without a body', async () => {
     mockFetch(new Response(null, {status: 204}));
 
     const result = await new Fetch().request({
@@ -156,7 +156,7 @@ describe('Fetch', () => {
     assert.equal(result, undefined);
   });
 
-  it('GET без body не отправляет Content-Type', async () => {
+  it('should not send Content-Type if a GET request has no body', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({method: 'get', url: 'https://example.com'});
@@ -166,7 +166,7 @@ describe('Fetch', () => {
     assert.equal(headers.has('content-type'), false);
   });
 
-  it('timeout превращается в AbortSignal', async () => {
+  it('should pass an AbortSignal if timeout is set', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({ method: 'get', url: 'https://example.com', timeout: 1000 });
@@ -174,7 +174,7 @@ describe('Fetch', () => {
     assert.ok(calls[0]?.init.signal instanceof AbortSignal);
   });
 
-  it('без timeout signal не передаётся', async () => {
+  it('should not pass a signal if timeout is not set', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({ method: 'get', url: 'https://example.com' });
@@ -182,7 +182,7 @@ describe('Fetch', () => {
     assert.equal(calls[0]?.init.signal, undefined);
   });
 
-  it('запрос реально прерывается по timeout', async () => {
+  it('should abort the request if the timeout elapses', async () => {
     globalThis.fetch = ((_url: string, init: RequestInit) =>
       new Promise((_resolve, reject) => {
         init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
@@ -193,7 +193,7 @@ describe('Fetch', () => {
     );
   });
 
-  it('пропускает null и undefined в params', async () => {
+  it('should skip null and undefined values if they are in params', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({
@@ -205,7 +205,7 @@ describe('Fetch', () => {
     assert.equal(calls[0]?.url, 'https://example.com/?a=1');
   });
 
-  it('не-json ответ возвращается строкой', async () => {
+  it('should return a string if the response is not json', async () => {
     mockFetch(new Response('plain text', { headers: { 'Content-Type': 'text/plain' } }));
 
     const result = await new Fetch().request({ method: 'get', url: 'https://example.com' });
@@ -213,7 +213,7 @@ describe('Fetch', () => {
     assert.equal(result, 'plain text');
   });
 
-  it('кидает понятную ошибку при невалидном json', async () => {
+  it('should throw a clear error if the json is invalid', async () => {
     mockFetch(new Response('{oops', { headers: { 'Content-Type': 'application/json' } }));
 
     await assert.rejects(
@@ -222,7 +222,7 @@ describe('Fetch', () => {
     );
   });
 
-  it('пустое тело с application/json не падает', async () => {
+  it('should not fail if the body is empty with application/json', async () => {
     mockFetch(new Response('', { headers: { 'Content-Type': 'application/json' } }));
 
     const result = await new Fetch().request({ method: 'get', url: 'https://example.com' });
@@ -230,7 +230,7 @@ describe('Fetch', () => {
     assert.equal(result, '');
   });
 
-  it('ответ 205 без тела возвращает undefined', async () => {
+  it('should return undefined if the response is 205 without a body', async () => {
     mockFetch(new Response(null, { status: 205 }));
 
     const result = await new Fetch().request({ method: 'post', url: 'https://example.com' });
@@ -238,7 +238,7 @@ describe('Fetch', () => {
     assert.equal(result, undefined);
   });
 
-  it('не-json ответ возвращается строкой и для запроса с body', async () => {
+  it('should return a string if the response is not json and the request has a body', async () => {
     mockFetch(new Response('plain text', { headers: { 'Content-Type': 'text/plain' } }));
 
     const result = await new Fetch().request({
@@ -250,7 +250,7 @@ describe('Fetch', () => {
     assert.equal(result, 'plain text');
   });
 
-  it('ответ без Content-Type возвращается строкой', async () => {
+  it('should return a string if the response has no Content-Type', async () => {
     mockFetch(new Response('raw'));
 
     const result = await new Fetch().request({ method: 'get', url: 'https://example.com' });
@@ -258,7 +258,7 @@ describe('Fetch', () => {
     assert.equal(result, 'raw');
   });
 
-  it('json распарсивается независимо от наличия body в запросе', async () => {
+  it('should parse json if the response is json regardless of the request body', async () => {
     for (const body of [undefined, { a: 1 }]) {
       mockFetch(jsonResponse({ ok: 1 }));
 
@@ -272,7 +272,7 @@ describe('Fetch', () => {
     }
   });
 
-  it('без method по умолчанию используется GET', async () => {
+  it('should use GET if no method is given', async () => {
     mockFetch(jsonResponse({}));
 
     await new Fetch().request({ url: 'https://example.com' } as never);
@@ -280,7 +280,7 @@ describe('Fetch', () => {
     assert.equal(calls[0]?.init.method, 'GET');
   });
 
-  it('отказ fetch не-Error значением -> NetworkError со строкой', async () => {
+  it('should throw NetworkError with a string message if fetch rejects with a non-Error value', async () => {
     globalThis.fetch = (async () => {
       throw 'boom';
     }) as unknown as typeof fetch;
@@ -291,7 +291,7 @@ describe('Fetch', () => {
     );
   });
 
-  it('TimeoutError без заданного timeout не содержит мс в сообщении', async () => {
+  it('should omit milliseconds from the TimeoutError message if no timeout is set', async () => {
     globalThis.fetch = (async () => {
       throw new DOMException('aborted', 'TimeoutError');
     }) as typeof fetch;
@@ -304,7 +304,7 @@ describe('Fetch', () => {
     );
   });
 
-  it('сообщение TimeoutError содержит миллисекунды', async () => {
+  it('should include milliseconds in the TimeoutError message if a timeout is set', async () => {
     globalThis.fetch = (async () => {
       throw new DOMException('aborted', 'TimeoutError');
     }) as typeof fetch;
@@ -315,7 +315,7 @@ describe('Fetch', () => {
     );
   });
 
-  it('HttpError без тела: data — пустая строка', async () => {
+  it('should set data to an empty string if the HttpError has no body', async () => {
     mockFetch(new Response(null, { status: 500 }));
 
     await assert.rejects(
@@ -324,7 +324,7 @@ describe('Fetch', () => {
     );
   });
 
-  it('HttpError с пустым json-телом: data — пустая строка', async () => {
+  it('should set data to an empty string if the HttpError has an empty json body', async () => {
     mockFetch(new Response('', { status: 502, headers: { 'Content-Type': 'application/json' } }));
 
     await assert.rejects(

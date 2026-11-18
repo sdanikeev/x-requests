@@ -1,4 +1,4 @@
-import type { Method } from '../types.js';
+import type { Method } from './types.js';
 
 export type FromOpenApi<Paths> = {
   [Path in keyof Paths & string]: MethodsOf<Paths[Path]>;

@@ -35,13 +35,13 @@ interface Routes {
   };
 }
 
-describe('типизация роутов', () => {
-  it('выводит имена path-параметров из строки', () => {
+describe('route typing', () => {
+  it('should infer path param names from the string if the url has placeholders', () => {
     assertType<Equal<PathParamNames<'/a/{x}/b/{y}'>, 'x' | 'y'>>();
     assertType<Equal<PathParamNames<'/plain'>, never>>();
   });
 
-  it('тип ответа берётся из роута', async () => {
+  it('should take the response type from the route if it is declared', async () => {
     const { fetcher } = createFakeFetcher([{ id: 1, name: 'A' }]);
     const client = new XClient<Routes>(fetcher);
 
@@ -54,22 +54,22 @@ describe('типизация роутов', () => {
     assert.deepEqual(users, [{ id: 1, name: 'A' }]);
   });
 
-  it('предлагает только роуты с нужным методом', () => {
+  it('should offer only routes with the given method if a method is called', () => {
     const { fetcher } = createFakeFetcher();
     const client = new XClient<Routes>(fetcher);
 
-    // /ping имеет только get
+    // /ping only has get
     // @ts-expect-error
     void (() => client.post('/ping'));
-    // несуществующий путь
+    // unknown path
     // @ts-expect-error
     void (() => client.get('/nope'));
-    // у /users нет delete
+    // /users has no delete
     // @ts-expect-error
     void (() => client.delete('/users'));
   });
 
-  it('path-параметры обязательны и проверяются по именам', async () => {
+  it('should require path params and check their names if the route has placeholders', async () => {
     const { fetcher, calls } = createFakeFetcher({ id: 1, name: 'A' });
     const client = new XClient<Routes>(fetcher);
 
@@ -77,17 +77,17 @@ describe('типизация роутов', () => {
     assertType<Equal<typeof user, User>>();
     assert.equal(calls[0]?.url, '/companies/1/users/2');
 
-    // @ts-expect-error — параметры не переданы
+    // @ts-expect-error — params are missing
     void (() => client.get('/companies/{companyId}/users/{userId}'));
-    // @ts-expect-error — опечатка в имени
+    // @ts-expect-error — typo in the name
     void (() => client.get('/companies/{companyId}/users/{userId}', { companyId: 1, user: 2 }));
-    // @ts-expect-error — не хватает параметра
+    // @ts-expect-error — a param is missing
     void (() => client.get('/companies/{companyId}/users/{userId}', { companyId: 1 }));
-    // @ts-expect-error — роут без параметров не принимает их
+    // @ts-expect-error — a route without params does not accept them
     void (() => client.get('/users', { id: 1 }));
   });
 
-  it('body типизируется по роуту', async () => {
+  it('should type body from the route if it is declared', async () => {
     const { fetcher, calls } = createFakeFetcher({ id: 1, name: 'A' });
     const client = new XClient<Routes>(fetcher);
 
@@ -95,37 +95,37 @@ describe('типизация роутов', () => {
     assertType<Equal<typeof created, User>>();
     assert.deepEqual(calls[0]?.body, { name: 'A' });
 
-    // @ts-expect-error — неверное поле
+    // @ts-expect-error — invalid field
     void (() => client.post('/users').body({ title: 'A' }));
-    // @ts-expect-error — у get /users нет body
+    // @ts-expect-error — get /users has no body
     void (() => client.get('/users').body({ name: 'A' }));
   });
 
-  it('params (query) типизируются по роуту', async () => {
+  it('should type params (query) from the route if they are declared', async () => {
     const { fetcher, calls } = createFakeFetcher([]);
     const client = new XClient<Routes>(fetcher);
 
     await client.get('/users').params({ page: 2 });
     assert.deepEqual(calls[0]?.params, { page: 2 });
 
-    // @ts-expect-error — page должен быть числом
+    // @ts-expect-error — page must be a number
     void (() => client.get('/users').params({ page: 'two' }));
-    // @ts-expect-error — у post /users нет query
+    // @ts-expect-error — post /users has no query
     void (() => client.post('/users').params({ page: 1 }));
   });
 
-  it('fallback расширяет тип результата и сохраняет типизацию', async () => {
+  it('should widen the result type and keep typing if fallback is used', async () => {
     const { fetcher } = createFakeFetcher({ id: 1, name: 'A' });
     const client = new XClient<Routes>(fetcher);
 
     const result = await client.post('/users').body({ name: 'A' }).fallback(null);
     assertType<Equal<typeof result, User | null>>();
 
-    // @ts-expect-error — типизация body не потерялась после fallback
+    // @ts-expect-error — body typing is kept after fallback
     void (() => client.post('/users').fallback(null).body({ nope: 1 }));
   });
 
-  it('без описанных роутов клиент принимает любой url (как раньше)', async () => {
+  it('should accept any url if no routes are described', async () => {
     const { fetcher, calls } = createFakeFetcher({ any: 1 });
     const client = new XClient(fetcher);
 
@@ -135,10 +135,10 @@ describe('типизация роутов', () => {
     assert.equal(calls[0]?.url, '/whatever/5');
   });
 
-  describe('типизация ошибок', () => {
+  describe('error typing', () => {
     type NotFound = { message: string };
 
-    it('result() возвращает дискриминируемый union', async () => {
+    it('result() should return a discriminated union if it is awaited', async () => {
       const { fetcher } = createFlakyFetcher(0, { id: 1 });
       const client = new XClient<Routes>(fetcher);
 
@@ -154,13 +154,13 @@ describe('типизация роутов', () => {
 
     type ErrorOfResult<R> = R extends { ok: false; error: infer E } ? E : never;
 
-    it('error содержит объявленные HttpError и системные ошибки', async () => {
+    it('should include declared HttpErrors and system errors if errors are declared', async () => {
       const { fetcher } = createFlakyFetcher(10, undefined, () => new HttpError(404, '{}', { message: 'nf' }));
       const client = new XClient<Routes>(fetcher);
       const request = client.get('/orders/{id}', { id: 1 });
       type Err = ErrorOfResult<Awaited<ReturnType<typeof request.result>>>;
 
-      // проверки сужения живут в функции, чтобы flow-анализ теста не влиял на типы
+      // narrowing checks live in a function so the test's flow analysis does not affect the types
       const narrow = (error: Err) => {
         assertType<Equal<typeof error.kind, 'http' | 'timeout' | 'network' | 'parse'>>();
 
@@ -184,7 +184,7 @@ describe('типизация роутов', () => {
       assert.equal((result.error.data as NotFound).message, 'nf');
     });
 
-    it('роут без errors: HttpError с unknown-данными', async () => {
+    it('should use HttpError with unknown data if the route has no errors', async () => {
       const { fetcher } = createFlakyFetcher(10);
       const client = new XClient<Routes>(fetcher);
 
@@ -199,7 +199,7 @@ describe('типизация роутов', () => {
       assert.equal(result.ok, false);
     });
 
-    it('в нетипизированном режиме error = RequestError', async () => {
+    it('should type error as RequestError if the client is untyped', async () => {
       const { fetcher } = createFlakyFetcher(10);
 
       const result = await new XClient(fetcher).get('/x').result();
@@ -208,7 +208,7 @@ describe('типизация роутов', () => {
       assert.equal(result.ok, false);
     });
 
-    it('errors сохраняются после .fallback() и других методов цепочки', () => {
+    it('should keep errors if .fallback() or other chain methods are called', () => {
       const { fetcher } = createFlakyFetcher(0, { id: 1 });
       const client = new XClient<Routes>(fetcher);
 
@@ -220,7 +220,7 @@ describe('типизация роутов', () => {
       assertType<Equal<Extract<Err, HttpError<404, NotFound>>, HttpError<404, NotFound>>>();
     });
 
-    it('isHttpError на unknown (catch) сужает до HttpError', () => {
+    it('isHttpError should narrow unknown (catch) to HttpError if it returns true', () => {
       const check = (caught: unknown) => {
         if (isHttpError(caught, 409)) {
           assertType<Equal<typeof caught, HttpError<409>>>();
@@ -232,7 +232,7 @@ describe('типизация роутов', () => {
     });
   });
 
-  describe('errors.default и типы path-параметров в ручных роутах', () => {
+  describe('errors.default and path param types in manual routes', () => {
     type Body = { message: string };
 
     interface Manual {
@@ -245,16 +245,16 @@ describe('типизация роутов', () => {
       };
     }
 
-    it('path-параметры берутся из объявленного path', () => {
+    it('should take path params from the declared path if it is set', () => {
       const { fetcher } = createFlakyFetcher(0);
       const client = new XClient<Manual>(fetcher);
 
       void (() => client.get('/items/{id}', { id: 1 }));
-      // @ts-expect-error — id объявлен как number
+      // @ts-expect-error — id is declared as number
       void (() => client.get('/items/{id}', { id: 'x' }));
     });
 
-    it('default типизирует HttpError для остальных статусов, объявленные остаются точными', async () => {
+    it('should type HttpError for other statuses and keep declared ones exact if default is declared', async () => {
       const { fetcher } = createFlakyFetcher(10, undefined, () => new HttpError(500, ''));
       const client = new XClient<Manual>(fetcher);
       const request = client.get('/items/{id}', { id: 1 });

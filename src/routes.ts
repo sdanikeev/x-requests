@@ -5,14 +5,13 @@ import type { Body, HeadersData, Method, Params, PathParams } from './types.js';
  * Empty on purpose: extend it with declaration merging to describe the API
  * of the whole application, or pass your own routes to `xclient<Routes>()`.
  *
- * declare module 'x-requests' {
+ * declare module '@x-requests/core' {
  *   interface RegisteredRoutes extends MyRoutes {}
  * }
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface RegisteredRoutes { }
 
-/** Description of a single `path + method` pair. */
 export type RouteDef = {
   response?: unknown;
   body?: unknown;
@@ -27,12 +26,10 @@ export type RouteDef = {
   errors?: Partial<Record<number | 'default', unknown>>;
 };
 
-/** `{ '/users/{id}': { get: RouteDef; patch: RouteDef } }` */
 export type RoutesConstraint<R> = {
   [P in keyof R]: Partial<Record<Method, RouteDef>>;
 };
 
-/** True when no routes are described: the client then accepts any url. */
 export type IsUntyped<R> = [keyof R] extends [never] ? true : false;
 
 export type PathsWith<R, M extends Method> = {
@@ -51,7 +48,6 @@ type DefOf<R, P, M extends Method> = P extends keyof R
 
 type Field<D, K extends string> = K extends keyof D ? Exclude<D[K], undefined> : never;
 
-/** `'/a/{x}/b/{y}'` -> `'x' | 'y'` */
 export type PathParamNames<P extends string>
   = P extends `${string}{${infer Name}}${infer Rest}`
     ? Name | PathParamNames<Rest>
@@ -68,14 +64,12 @@ type PathOf<R, P extends string, M extends Method> = DefOf<R, P, M> extends infe
     : PathParamsOf<P>
   : PathParamsOf<P>;
 
-/** Arguments after the url: required path params for typed routes. */
 export type PathArgs<R, P extends string, M extends Method> = IsUntyped<R> extends true
   ? [path?: PathParams]
   : [PathParamNames<P>] extends [never]
       ? []
       : [path: PathOf<R, P, M>];
 
-/** What a request builder accepts for `.body() / .params() / .headers() / .path()`. */
 export type RequestInput = {
   body: unknown;
   query: unknown;
@@ -106,7 +100,6 @@ export type ResponseOf<R, P extends string, M extends Method> = IsUntyped<R> ext
     ? 'response' extends keyof D ? D['response'] : unknown
     : unknown;
 
-/** `{ ok: true, data }` or `{ ok: false, error }` — see `XRequest.result()`. */
 export type Result<T, E> =
   | { ok: true; data: T; error?: undefined }
   | { ok: false; error: E; data?: undefined };
@@ -117,7 +110,6 @@ type DeclaredErrors<D> = Field<D, 'errors'> extends infer Errors
       : { [S in keyof Errors & number]: HttpError<S, Errors[S]> }[keyof Errors & number]
   : never;
 
-/** The body of an `errors.default` entry, or `HttpError` with unknown data when not declared. */
 type AnyStatusError<D> = Field<D, 'errors'> extends infer Errors
   ? [Errors] extends [never]
       ? HttpError
