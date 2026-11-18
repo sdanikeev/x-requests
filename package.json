@@ -1,6 +1,6 @@
 {
   "name": "@x-requests/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Promise-like HTTP client with per-route types, retries, timeouts and fallbacks",
   "license": "MIT",
   "repository": {

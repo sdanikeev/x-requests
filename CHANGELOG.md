@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## @x-requests/core 0.2.0
 
-- `@x-requests/core`: middleware — `client.use()`, `client.onRequest()`, `client.onResponse()` and `config.middleware`.
+- Middleware — `client.use()`, `client.onRequest()`, `client.onResponse()` and `config.middleware`.
 
 ## @x-requests/codegen 0.1.1
 
