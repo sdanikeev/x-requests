@@ -140,7 +140,7 @@ describe('XRequest', () => {
       const { fetcher } = createFlakyFetcher(2);
       const start = Date.now();
 
-      await new XRequest(fetcher, 'get', 'https://example.com').retries(2, 30);
+      await new XRequest(fetcher, 'get', 'https://example.com').retries(2, 30, { jitter: false });
 
       assert.ok(Date.now() - start >= 80);
     });

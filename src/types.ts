@@ -1,8 +1,19 @@
 import type { Middleware } from './middleware.js';
 
+export type RetryOptions = {
+  /** Randomize the backoff between 50% and 100% of its value. Defaults to `true`. */
+  jitter?: boolean;
+  /** A `Retry-After` longer than this (ms) is not waited for: the request fails at once. Defaults to `30000`. */
+  maxRetryAfter?: number;
+  /** Also retry `POST` and `PATCH` without `.idempotent()`. A retried request may run twice. Defaults to `false`. */
+  unsafe?: boolean;
+};
+
 export type Config = {
   baseUrl?: string;
   maxRetries?: number;
+  /** Defaults for every request; `.retries(count, backoffMs, options)` overrides them. */
+  retry?: RetryOptions;
   /** Header used by `.idempotent()`. Defaults to `Idempotency-Key`. */
   idempotencyHeader?: string;
   middleware?: Middleware[];

@@ -47,7 +47,7 @@ can usually do more through hooks or middleware. `x-requests` is the combination
 - Per-request timeouts, cancellation with `AbortSignal` and `.fallback()`.
 - Server-sent events as a typed async iterable with automatic reconnects.
 - Automatic JSON handling for request bodies and responses, `multipart/form-data` uploads and binary downloads.
-- Built-in middleware: auth with token refresh, logging, response cache with request deduplication.
+- Built-in middleware: auth with token refresh, logging, response cache with request deduplication, circuit breaker and rate limiting.
 - Pluggable `Fetcher` — swap the transport for tests or custom logic.
 - Written in TypeScript with strict types; ESM-only.
 
@@ -163,7 +163,8 @@ const report = await client.get('/report.pdf').responseType('blob'); // Blob
 
 `.retries(3)` means **1 main request + up to 3 retries** (4 requests at most).
 The delay between attempts grows exponentially: `backoffMs * 2^attempt`
-(500 ms, 1 s, 2 s, ... by default).
+(500 ms, 1 s, 2 s, ... by default), randomized between 50% and 100% of that value ("jitter"),
+so that many clients do not retry at the same moment.
 
 Only the following failures are retried:
 
@@ -171,9 +172,28 @@ Only the following failures are retried:
 - `5xx` responses;
 - `429 Too Many Requests` (see `isRetryableStatus`).
 
-Other `4xx` responses and validation errors are thrown immediately.
+Other `4xx` responses, validation errors and an open circuit (`CircuitOpenError`) are thrown immediately.
 
 `retries` must be at least `1` and cannot exceed `config.maxRetries` if it is set.
+
+```ts
+await client.get('/orders').retries(3, 200, { jitter: false, maxRetryAfter: 10_000 });
+xclient({ config: { retry: { jitter: false } } }); // defaults for every request
+```
+
+| Option          | Default   | Description |
+| --------------- | --------- | ----------- |
+| `jitter`        | `true`    | Randomize the pause between 50% and 100% of the backoff. |
+| `maxRetryAfter` | `30000`   | A `Retry-After` longer than this many ms is not waited for: the request fails at once. |
+| `unsafe`        | `false`   | Also retry `POST` and `PATCH` without `.idempotent()`. |
+
+**`Retry-After`.** For a `429` or `503` response the pause is what the server asks for in `Retry-After`
+(seconds or an HTTP date) instead of the backoff. The headers of an error response are available as `error.headers`.
+
+**`POST` and `PATCH` are retried only after [`.idempotent()`](#idempotency).** If the first attempt reached the server but the response got lost,
+a retry would run the operation twice. Without a key such a request fails with the first error. `GET`, `PUT`, `DELETE` and `OPTIONS` are
+retried as usual. If your API is safe to repeat anyway, pass `{ unsafe: true }` or set it in `config.retry`.
+The same rule applies to the reconnects of a `.stream()`.
 
 ### Idempotency
 
@@ -185,6 +205,7 @@ await client.post('/payments').body(order).idempotent().retries(3); // random UU
 await client.post('/payments').body(order).idempotent(`order-${order.id}`); // or your own key
 ```
 
+- It is also what allows retries: a `POST` or `PATCH` is retried only after `.idempotent()` (see [Retries](#retries)).
 - The key is created once per request, so retries and stream reconnects carry the same one; two requests get different keys.
 - A header of the same name set with `.headers()` is never overwritten.
 - Use another header name with `xclient({ config: { idempotencyHeader: 'X-Request-Id' } })`.
@@ -207,7 +228,7 @@ missing URL) are never replaced by the fallback.
 
 ### Errors
 
-A request fails with one of four classes, all extending `XRequestError` and
+A request fails with one of six classes, all extending `XRequestError` and
 distinguished by a `kind` field:
 
 | Class          | `kind`      | When                                                         |
@@ -216,6 +237,8 @@ distinguished by a `kind` field:
 | `TimeoutError` | `'timeout'` | `.timeout(ms)` exceeded.                                     |
 | `NetworkError` | `'network'` | No response (DNS, connection reset, offline). `cause` holds the original error. |
 | `ParseError`   | `'parse'`   | A successful response with invalid JSON.                     |
+| `AbortError`   | `'abort'`   | The request was cancelled with `.signal()`.                  |
+| `CircuitOpenError` | `'circuit'` | `circuitBreakerMiddleware` refused the call; `retryAfterMs` says when to try again. |
 
 Programmer mistakes (missing URL, missing path parameter) throw a `ValidationError`
 and are not part of this set.
@@ -231,7 +254,7 @@ if (result.ok) {
 } else if (isHttpError(result.error, 404)) {
   result.error.data.message;         // typed by routes: HttpError<404, NotFound>
 } else {
-  result.error.kind;                 // 'http' | 'timeout' | 'network' | 'parse'
+  result.error.kind;                 // 'http' | 'timeout' | 'network' | 'parse' | 'abort' | 'circuit'
 }
 ```
 
@@ -342,13 +365,17 @@ Middlewares can also be passed up front: `xclient({ config: { middleware: [...] 
 #### Built-in middleware
 
 ```ts
-import xclient, { authMiddleware, cacheMiddleware, loggerMiddleware } from '@x-requests/core';
+import xclient, {
+  authMiddleware, cacheMiddleware, circuitBreakerMiddleware, loggerMiddleware, rateLimitMiddleware,
+} from '@x-requests/core';
 
 const client = xclient({
   config: {
     baseUrl: 'https://api.example.com',
     middleware: [
       loggerMiddleware(),
+      rateLimitMiddleware({ limit: 10, interval: 1000 }),
+      circuitBreakerMiddleware(),
       authMiddleware({ getToken: () => session.token, refresh: async () => (session.token = await renewToken()) }),
       cacheMiddleware({ ttl: 30_000 }), // after auth: the Authorization header becomes part of the cache key
     ],
@@ -378,6 +405,19 @@ A stream is logged once, when it ends. Without `log` it writes one line to `cons
 - Objects are cloned for every caller (`clone: false` shares the instance). The least recently used entry is dropped above `maxEntries` (500).
 - `cache.clear()` and `cache.invalidate(url)` drop entries by hand, for example on logout.
 - Streams are never cached.
+
+**`circuitBreakerMiddleware({ failureThreshold?, resetTimeout?, key?, isFailure? })`** stops calling a service that keeps failing.
+After `failureThreshold` (5) failures in a row every request fails at once with a `CircuitOpenError`, which is not retried, and `.fallback()` can replace it.
+After `resetTimeout` (30 s) one trial request goes through: if it succeeds the circuit closes, otherwise it opens again.
+- Requests share a circuit by the origin of the url (`key` changes that). `breaker.state(key)` and `breaker.reset(key?)` inspect and close circuits.
+- Network errors, timeouts and `5xx` are failures (`isFailure` changes that). A `4xx` (also `429`) or a parse error means the service is alive; an abort changes nothing.
+- A stream is refused while the circuit is open, but the outcome of a stream is not counted.
+
+**`rateLimitMiddleware({ limit?, interval?, maxConcurrent?, maxQueue?, key? })`** keeps requests within a rate. At most `limit` requests start
+within any `interval` ms and at most `maxConcurrent` run at the same time; the rest wait their turn (first in, first out) instead of failing.
+- Every attempt of a retried request takes its own place. A request that is aborted while it waits leaves the queue without using the limit.
+- With `maxQueue` a longer queue fails with a `NetworkError`. A stream holds its place until it ends.
+- Limits are shared by the origin of the url (`key` changes that). Register it before `circuitBreakerMiddleware`, so that refused requests do not wait for a place.
 
 ### Custom fetcher
 

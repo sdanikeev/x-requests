@@ -1,5 +1,21 @@
 # Changelog
 
+## @x-requests/core 0.5.0
+
+- **Breaking:** `POST` and `PATCH` are retried only after `.idempotent()`, because the first attempt may have reached the server. Without a key `.retries()` on such a request passes the first error on. Restore the old behavior with `{ unsafe: true }` in `.retries(count, backoffMs, options)` or `config.retry`. The same rule applies to the reconnects of `.stream()`.
+- Retries honor `Retry-After` of a `429`/`503` response (seconds or an HTTP date); a value above `maxRetryAfter` (30 s) fails the request at once. `HttpError` gets `headers`.
+- The pause between retries is randomized ("jitter", 50-100% of the backoff); turn it off with `{ jitter: false }`.
+- `.retries(count, backoffMs?, options?)` and `config.retry` take `RetryOptions` (`jitter`, `maxRetryAfter`, `unsafe`).
+- `circuitBreakerMiddleware` and the new `CircuitOpenError` (`kind: 'circuit'`, part of `RequestError`; not retried).
+- `rateLimitMiddleware`: `limit` per `interval`, `maxConcurrent`, a queue with `maxQueue`, abort-aware.
+
+## @x-requests/codegen 0.2.0
+
+- `x-requests gen` reads `x-requests.config.json` (or `--config`) with several `{ from, to }` schemas when `--from`/`--to` are not given.
+- `--check` fails with exit code `1` when an output file is missing or out of date, for CI.
+- `--watch` generates again when a local source file changes.
+- `Generator` gets `render()` and `check()`; `loadConfig` is exported.
+
 ## @x-requests/core 0.4.0
 
 - Files: `.multipart(object | FormData)` for `multipart/form-data`, `FormData`, `Blob`, `URLSearchParams` and `ArrayBuffer` bodies, and `.responseType('blob' | 'arrayBuffer' | 'text')` for binary and raw responses.

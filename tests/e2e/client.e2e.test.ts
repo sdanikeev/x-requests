@@ -1,7 +1,7 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import xclient, { AbortError, HttpError, HttpStatus, authMiddleware, cacheMiddleware, isHttpError, loggerMiddleware } from '../../src/index.js';
+import xclient, { AbortError, HttpError, HttpStatus, authMiddleware, cacheMiddleware, circuitBreakerMiddleware, CircuitOpenError, isHttpError, loggerMiddleware } from '../../src/index.js';
 import type { ServerResponse } from 'node:http';
 import type { LogEntry } from '../../src/index.js';
 import { sendJson, sleep, startServer } from './server.js';
@@ -28,6 +28,10 @@ interface Routes {
   '/upload': { post: { response: { contentType: string; body: string } } };
   '/payments': { post: { response: { key: string | null; attempt: number } } };
   '/secure': { get: { response: { user: string } } };
+  '/retry-after': { get: { response: { attempt: number } } };
+  '/order': { post: { response: { attempt: number } } };
+  '/order-safe': { post: { response: { attempt: number } } };
+  '/broken': { get: { response: never } };
   '/no-store': { get: { response: { hit: number } } };
   '/sse/secure': { get: { events: { tick: { n: number } } } };
   '/cached': { get: { response: { hit: number } } };
@@ -88,6 +92,19 @@ describe('e2e: client against a real HTTP server', () => {
         ? sendJson(res, 200, { user: 'me' })
         : sendJson(res, 401, { message: 'expired' }),
       '/cached': ({ res, hit }) => sendJson(res, 200, { hit }),
+      '/retry-after': ({ res, hit }) => {
+        if (hit > 1) return sendJson(res, 200, { attempt: hit });
+
+        res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '1' });
+        res.end('{"message":"later"}');
+      },
+      '/order': ({ res, hit }) => hit === 1
+        ? sendJson(res, 503, { message: 'try later' })
+        : sendJson(res, 200, { attempt: hit }),
+      '/order-safe': ({ res, hit }) => hit === 1
+        ? sendJson(res, 503, { message: 'try later' })
+        : sendJson(res, 200, { attempt: hit }),
+      '/broken': ({ res }) => sendJson(res, 500, { message: 'broken' }),
       '/no-store': ({ res, hit }) => {
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
         res.end(JSON.stringify({ hit }));
@@ -328,6 +345,47 @@ describe('e2e: client against a real HTTP server', () => {
     });
   });
 
+  describe('reliable retries', () => {
+    it('should wait for Retry-After before the next attempt if the server asks for it', async () => {
+      const started = Date.now();
+      const result = await client.get('/retry-after').retries(1, 10);
+
+      assert.deepEqual(result, { attempt: 2 });
+      assert.ok(Date.now() - started >= 950);
+    });
+
+    it('should not repeat a POST if it is not idempotent', async () => {
+      const before = server.hitsOf('/order');
+      const result = await client.post('/order').retries(2, 1).result();
+
+      assert.ok(!result.ok);
+      assert.equal(server.hitsOf('/order') - before, 1);
+    });
+
+    it('should repeat a POST if it is idempotent', async () => {
+      const before = server.hitsOf('/order-safe');
+      const result = await client.post('/order-safe').idempotent().retries(2, 1);
+
+      assert.equal(server.hitsOf('/order-safe') - before, 2);
+      assert.equal(result.attempt, 2);
+    });
+
+    it('should stop calling the server if the circuit breaker opens', async () => {
+      const guarded = xclient<Routes>({
+        config: { baseUrl: server.url, middleware: [circuitBreakerMiddleware({ failureThreshold: 2, resetTimeout: 60_000 })] },
+      });
+      const before = server.hitsOf('/broken');
+
+      await guarded.get('/broken').result();
+      await guarded.get('/broken').result();
+
+      const refused = await guarded.get('/broken').result();
+
+      assert.ok(!refused.ok && refused.error instanceof CircuitOpenError);
+      assert.equal(server.hitsOf('/broken') - before, 2);
+    });
+  });
+
   describe('errors', () => {
     it('should throw HttpError with a typed body if the server responds with 404', async () => {
       const result = await client.get('/items/{id}', { id: 404 }).result();
@@ -396,7 +454,7 @@ describe('e2e: client against a real HTTP server', () => {
     it('should wait with exponential backoff between attempts if backoff is set', async () => {
       const started = Date.now();
 
-      await client.get('/always-503').retries(3, 20).result();
+      await client.get('/always-503').retries(3, 20, { jitter: false }).result();
 
       // pauses: 20 + 40 + 80 = 140 ms
       assert.ok(Date.now() - started >= 135, `too fast: ${Date.now() - started} ms`);

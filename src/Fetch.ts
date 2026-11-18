@@ -83,7 +83,7 @@ class Fetch implements Fetcher {
         const raw = await response.text();
         const isJson = Boolean(response.headers.get('Content-Type')?.toLowerCase().includes('application/json'));
 
-        throw new HttpError(response.status, raw, this.parseErrorBody(raw, isJson));
+        throw new HttpError(response.status, raw, this.parseErrorBody(raw, isJson), response.headers);
       }
 
       if (!response.body) return;
@@ -201,7 +201,7 @@ class Fetch implements Fetcher {
     const isJson = contentType.includes('application/json');
 
     if (!response.ok) {
-      throw new HttpError(response.status, rawResponse, this.parseErrorBody(rawResponse, isJson));
+      throw new HttpError(response.status, rawResponse, this.parseErrorBody(rawResponse, isJson), response.headers);
     }
 
     if (isEmptyResponse(response.status)) {

@@ -29,12 +29,13 @@ src/
   middleware.ts         Middleware/Next types and compose()
   sse.ts                SSE parser (parseSse)
   errors.ts             HttpError, NetworkError, TimeoutError, ParseError, AbortError, ValidationError
-  middlewares/          built-in middleware: authMiddleware, loggerMiddleware, cacheMiddleware
+  middlewares/          built-in middleware: auth, logger, cache, circuitBreaker, rateLimit
+  url.ts                originOf() (default key of the circuit breaker and the rate limit)
   headers.ts            case-insensitive hasHeader()
   routes.ts             route typing (RouteDef, RegisteredRoutes, EventOf, ...)
   openapi.ts            FromOpenApi: maps openapi-typescript `paths` to routes
   statusCodes.ts, types.ts
-packages/codegen/       CLI `x-requests gen --from <file|url> --to <out.d.ts>` over openapi-typescript
+packages/codegen/       CLI `x-requests gen` (`--from/--to`, or `x-requests.config.json`; `--check`, `--watch`) over openapi-typescript
 tests/, tests/e2e/      unit/type tests and e2e tests; shared mocks in tests/helpers.ts
 examples/               openapi.json + generated_v1.ts (used by tests/openapi.test.ts)
 ```
@@ -53,13 +54,14 @@ examples/               openapi.json + generated_v1.ts (used by tests/openapi.te
 
 - A request is a thenable; the request runs once, repeated `await`s reuse the same promise.
 - Errors: `.result()` returns `{ ok, data } | { ok: false, error }` and never rejects, except `ValidationError` (programmer mistakes always throw).
-- Retries: exponential backoff, only for retryable errors (`HttpError` with 429/5xx, `NetworkError`, `TimeoutError`). Never for `ParseError` or `AbortError`.
+- Retries: exponential backoff with jitter (50-100%), only for retryable errors (`HttpError` with 429/5xx, `NetworkError`, `TimeoutError`). Never for `ParseError`, `AbortError` or `CircuitOpenError`. A `Retry-After` of a 429/503 replaces the backoff (over `maxRetryAfter` the request fails at once). `POST`/`PATCH` are retried only with `.idempotent()` or `unsafe: true` (`config.retry` or `.retries()` options); `canRetry()` in `XRequest` holds the whole policy, also for stream reconnects.
 - `.fallback()` replaces failures but never hides `ValidationError` or `AbortError`.
 - Middleware is an onion around the `Fetcher`, so it runs on **every attempt** of a retried request. `onRequest` runs in registration order, `onResponse` in reverse. Each client owns its own list; `use()` returns an unsubscribe function.
 - Cancellation: `.signal(AbortSignal)`; combined with `.timeout()` via `AbortSignal.any` (manual fallback for Node < 20.3). Abort also interrupts the backoff pause.
 - Files: `.multipart()` builds a `FormData` (not checked against the route body type); `Fetch` sets no `Content-Type` for `FormData`/`Blob`/`URLSearchParams` so that `fetch` adds the boundary. `.responseType()` only changes how a successful response is read.
 - `.idempotent(key?)` creates the key once, so every retry and stream reconnect sends the same `Idempotency-Key` (`Config.idempotencyHeader` renames it). The client does not deduplicate; caching is `cacheMiddleware`.
 - `MiddlewareFetcher.stream()` passes `stream: true` to the chain (and strips it before the `Fetcher`), because `next()` of a stream returns a generator that is not started yet. Middleware that must treat streams differently (cache, logger, auth) checks `data.stream`.
+- `circuitBreakerMiddleware` counts consecutive failures per origin and throws `CircuitOpenError` (`kind: 'circuit'`); `rateLimitMiddleware` queues requests per origin (sliding window + `maxConcurrent`, abort-aware) and takes a place per attempt, a stream takes it when it is read. Both take injectable `now` (and `schedule`) for tests.
 - `ResponseContext` is an out-parameter: `MiddlewareFetcher` creates one per attempt, passes it to the `Fetcher` as the second argument and to every middleware as the third. `Fetch` fills `status`/`headers` (also for error responses); custom fetchers may ignore it, so middleware must work with an empty one.
 - `cacheMiddleware` shares one in-flight call per key with its own `AbortController`; a caller's abort ends only its own wait (`join`/`leave`), the call is aborted when the last waiter leaves. `authMiddleware` reconnects a stream on a 401 only before its first event (later it would duplicate events).
 - SSE: `.stream()` returns an async generator. `data` is parsed as JSON unless `{ json: false }`. Reconnects after failures up to `.retries(n, backoff)` with `Last-Event-ID` and the server's `retry:` hint; a normally closed stream just ends. `.timeout()` only limits the wait for the connection.

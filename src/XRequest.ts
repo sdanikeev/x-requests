@@ -1,4 +1,4 @@
-import { AbortError, HttpError, ParseError, ValidationError, toRequestError } from './errors.js';
+import { AbortError, CircuitOpenError, HttpError, ParseError, ValidationError, toRequestError } from './errors.js';
 import { hasHeader } from './headers.js';
 import { isRetryableStatus } from './statusCodes.js';
 import type { RequestError } from './errors.js';
@@ -14,6 +14,7 @@ import type {
   Fetcher,
   FetcherRequestParams,
   ResponseType,
+  RetryOptions,
   SseEvent,
 } from './types.js';
 
@@ -37,6 +38,7 @@ class XRequest<
     signal?: AbortSignal;
     responseType?: ResponseType;
     idempotencyKey?: string;
+    retryOptions?: RetryOptions;
   } = {};
 
   private fallbackHandler: ((error: unknown) => unknown) | undefined;
@@ -163,7 +165,12 @@ class XRequest<
     return this as unknown as XRequest<T | F, In, E, Ev>;
   }
 
-  public retries(retries: number, backoffMs?: number) {
+  /**
+   * Retries a failed request up to `retries` times with exponential backoff (randomized, see `jitter`).
+   * A `Retry-After` of a 429/503 response replaces the backoff. `POST` and `PATCH` are retried only after
+   * `.idempotent()` (or with `unsafe: true`), because the first attempt may have reached the server.
+   */
+  public retries(retries: number, backoffMs?: number, options?: RetryOptions) {
     const maxRetries = this.globalConfig?.maxRetries;
 
     if (maxRetries !== undefined && retries > maxRetries) {
@@ -175,6 +182,8 @@ class XRequest<
 
     this.requestConfig.retries = retries;
     this.requestConfig.backoffMs = backoffMs ?? this.requestConfig.backoffMs ?? 500;
+
+    if (options) this.requestConfig.retryOptions = options;
 
     return this;
   }
@@ -250,9 +259,9 @@ class XRequest<
 
         return;
       } catch (error) {
-        if (failures >= retries || !XRequest.isRetryable(error)) throw error;
+        if (failures >= retries || !this.canRetry(error)) throw error;
 
-        await this.sleep(retryHint ?? backoffMs * 2 ** failures);
+        await this.sleep(retryHint ?? this.retryDelay(error, failures, backoffMs));
         failures++;
       }
     }
@@ -344,11 +353,11 @@ class XRequest<
       try {
         return await this.execute<T>();
       } catch (error) {
-        if (attempt >= retries || !XRequest.isRetryable(error)) {
+        if (attempt >= retries || !this.canRetry(error)) {
           throw error;
         }
 
-        await this.sleep(backoffMs * 2 ** attempt);
+        await this.sleep(this.retryDelay(error, attempt, backoffMs));
       }
     }
   }
@@ -376,8 +385,55 @@ class XRequest<
     });
   }
 
+  private retrySettings(): Required<RetryOptions> {
+    return {
+      jitter: true,
+      maxRetryAfter: 30_000,
+      unsafe: false,
+      ...this.globalConfig?.retry,
+      ...this.requestConfig.retryOptions,
+    };
+  }
+
+  private canRetry(error: unknown): boolean {
+    if (!XRequest.isRetryable(error)) return false;
+
+    const { unsafe, maxRetryAfter } = this.retrySettings();
+    const isUnsafe = this.requestData.method === 'post' || this.requestData.method === 'patch';
+
+    if (isUnsafe && !unsafe && this.requestConfig.idempotencyKey === undefined) return false;
+
+    const wait = XRequest.retryAfter(error);
+
+    return wait === undefined || wait <= maxRetryAfter;
+  }
+
+  private retryDelay(error: unknown, attempt: number, backoffMs: number): number {
+    const wait = XRequest.retryAfter(error);
+
+    if (wait !== undefined) return wait;
+
+    const backoff = backoffMs * 2 ** attempt;
+
+    return this.retrySettings().jitter ? backoff * (0.5 + Math.random() * 0.5) : backoff;
+  }
+
+  /** The delay a 429/503 response asks for, in ms (`Retry-After` is seconds or an HTTP date). */
+  private static retryAfter(error: unknown): number | undefined {
+    if (!(error instanceof HttpError) || (error.status !== 429 && error.status !== 503)) return undefined;
+
+    const value = error.headers?.get('retry-after')?.trim();
+
+    if (!value) return undefined;
+
+    const ms = /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+
+    return Number.isNaN(ms) ? undefined : Math.max(ms, 0);
+  }
+
   private static isRetryable(error: unknown): boolean {
-    if (error instanceof AbortError) return false;
+    // retrying an open circuit would only wait for nothing
+    if (error instanceof AbortError || error instanceof CircuitOpenError) return false;
 
     if (error instanceof HttpError) {
       return isRetryableStatus(error.status);

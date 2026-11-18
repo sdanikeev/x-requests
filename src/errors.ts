@@ -12,11 +12,13 @@ export class HttpError<S extends number = number, D = unknown> extends XRequestE
    * @param status HTTP status code
    * @param body raw response body
    * @param data parsed body (JSON when the response is JSON, otherwise the raw text)
+   * @param headers response headers, set by fetchers that report them (`Fetch` does)
    */
   constructor(
     public readonly status: S,
     public readonly body: string,
     public readonly data: D = body as D,
+    public readonly headers?: Headers,
   ) {
     super(`HTTP error! Status: ${status}. Body: ${body}`);
   }
@@ -50,6 +52,15 @@ export class ParseError extends XRequestError {
   }
 }
 
+/** Thrown by `circuitBreakerMiddleware` instead of calling a service that keeps failing. */
+export class CircuitOpenError extends XRequestError {
+  public readonly kind = 'circuit' as const;
+
+  constructor(public readonly retryAfterMs: number, options?: ErrorOptions) {
+    super(`The circuit is open, the service is not called. Try again in ${retryAfterMs} ms`, options);
+  }
+}
+
 export class ValidationError extends Error {
   public readonly kind = 'validation' as const;
 
@@ -59,7 +70,7 @@ export class ValidationError extends Error {
   }
 }
 
-export type RequestError = HttpError | TimeoutError | NetworkError | ParseError | AbortError;
+export type RequestError = HttpError | TimeoutError | NetworkError | ParseError | AbortError | CircuitOpenError;
 
 export const toRequestError = (error: unknown): RequestError => {
   if (error instanceof XRequestError) return error as RequestError;

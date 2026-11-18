@@ -63,7 +63,7 @@ describe('multipart', () => {
   it('should send the same FormData on every attempt if the request is retried', async () => {
     const { fetcher, calls } = createFlakyFetcher(2, { ok: true }, () => new NetworkError('down'));
 
-    await new XClient(fetcher).post('https://example.com/upload').multipart({ a: '1' }).retries(2, 1);
+    await new XClient(fetcher).post('https://example.com/upload').multipart({ a: '1' }).idempotent().retries(2, 1);
 
     assert.equal(calls.length, 3);
     assert.equal(calls[0]?.body, calls[2]?.body);
